@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      String   @default("student") // "admin" or "student"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subjects  Subject[]
+  attempts  Attempt[]
+}
+
+model Subject {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String
+
+  user   User    @relation(fields: [userId], references: [id])
+  quizzes Quiz[]
+}
+
+model Quiz {
+  id              String   @id @default(cuid())
+  title           String
+  description     String?
+  durationMinutes Int      @default(40)
+  order           Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  subjectId       String
+
+  subject   Subject    @relation(fields: [subjectId], references: [id])
+  questions Question[]
+  attempts  Attempt[]
+}
+
+model Question {
+  id        String   @id @default(cuid())
+  text      String
+  imageUrl  String?
+  order     Int      @default(0)
+  points    Int      @default(1)
+  quizId    String
+
+  quiz    Quiz     @relation(fields: [quizId], references: [id])
+  choices Choice[]
+  answers Answer[]
+}
+
+model Choice {
+  id         String   @id @default(cuid())
+  text       String
+  isCorrect  Boolean  @default(false)
+  order      Int      @default(0)
+  questionId String
+
+  question Question @relation(fields: [questionId], references: [id])
+  answers  Answer[]
+}
+
+model Attempt {
+  id          String    @id @default(cuid())
+  score       Int?
+  totalPoints Int?
+  startedAt   DateTime
+  submittedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  quizId      String
+  userId      String
+
+  quiz    Quiz     @relation(fields: [quizId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  answers Answer[]
+}
+
+model Answer {
+  id         String  @id @default(cuid())
+  attemptId  String
+  questionId String
+  choiceId   String?
+  createdAt  DateTime @default(now())
+
+  attempt  Attempt  @relation(fields: [attemptId], references: [id])
+  question Question @relation(fields: [questionId], references: [id])
+  choice   Choice?  @relation(fields: [choiceId], references: [id])
+}
