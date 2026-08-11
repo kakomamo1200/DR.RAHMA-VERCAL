@@ -6,11 +6,11 @@ export async function POST(request: NextRequest) {
   try {
     const { email, password, name } = await request.json();
     if (!email || !password) {
-      return NextResponse.json({ error: 'البريد الإلكتروني وكلمة السر مطلوبان' }, { status: 400 });
+      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
     const existing = await db.user.findUnique({ where: { email: email.toLowerCase().trim() } });
     if (existing) {
-      return NextResponse.json({ error: 'هذا البريد الإلكتروني مسجل بالفعل' }, { status: 409 });
+      return NextResponse.json({ error: 'This email is already registered' }, { status: 409 });
     }
     const userCount = await db.user.count();
     const role = userCount === 0 ? 'admin' : 'student';
@@ -25,6 +25,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Sign-up error:', error);
-    return NextResponse.json({ error: 'حدث خطأ أثناء التسجيل' }, { status: 500 });
+    return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
   }
 }

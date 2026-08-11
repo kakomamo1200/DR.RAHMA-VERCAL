@@ -178,10 +178,10 @@ export default function QuizBank() {
       localStorage.setItem("quiz_token", data.token);
       setUser(data.user);
       setView("home");
-      toast.success(data.user.role === "admin" ? "تم تسجيل الدخول كأدمن" : "تم تسجيل الدخول بنجاح");
+      toast.success(data.user.role === "admin" ? "Logged in as Admin" : "Logged in successfully");
       setAuthEmail(""); setAuthPassword(""); setAuthName("");
     } else {
-      toast.error(data.error || "حدث خطأ");
+      toast.error(data.error || "Something went wrong");
     }
     setAuthLoading(false);
   };
@@ -191,7 +191,7 @@ export default function QuizBank() {
     setUser(null);
     setView("home");
     setMobileMenuOpen(false);
-    toast.success("تم تسجيل الخروج");
+    toast.success("Logged out");
   };
 
   // Show review (declared first for hoisting)
@@ -212,7 +212,7 @@ export default function QuizBank() {
     if (timerRef.current) clearInterval(timerRef.current);
     const unanswered = quizAnswers.filter(a => a === null || a === undefined).length;
     if (!auto && unanswered > 0) {
-      if (!confirm(`لا يزال لديك ${unanswered} سؤال بدون إجابة. هل تريد التسليم كما هو؟`)) return;
+      if (!confirm(`You still have ${unanswered} unanswered question${unanswered === 1 ? "" : "s"}. Submit as-is?`)) return;
     }
     try {
       await api("/api/attempts", {
@@ -232,7 +232,7 @@ export default function QuizBank() {
         method: "POST",
         body: JSON.stringify({ action: "save", attemptId, answers: quizAnswers }),
       });
-      if (data.status === "saved") toast.success("تم الحفظ");
+      if (data.status === "saved") toast.success("Saved");
       if (data.status === "expired" || data.status === "already_submitted") { void submitQuiz(true); }
     } catch { /* silent */ }
   };
@@ -262,13 +262,13 @@ export default function QuizBank() {
 
   // Admin: Save subject
   const saveSubject = async () => {
-    if (!subjectName.trim()) { toast.error("اسم المادة مطلوب"); return; }
+    if (!subjectName.trim()) { toast.error("Subject name is required"); return; }
     if (editSubject) {
       await api("/api/subjects", { method: "PUT", body: JSON.stringify({ id: editSubject.id, name: subjectName, description: subjectDesc }) });
-      toast.success("تم تعديل المادة");
+      toast.success("Subject updated");
     } else {
       await api("/api/subjects", { method: "POST", body: JSON.stringify({ name: subjectName, description: subjectDesc }) });
-      toast.success("تم إضافة المادة");
+      toast.success("Subject added");
     }
     setSubjectDialog(false);
     setEditSubject(null);
@@ -278,22 +278,22 @@ export default function QuizBank() {
 
   // Admin: Delete subject
   const deleteSubject = async (id: string) => {
-    if (!confirm("هل أنت متأكد من حذف هذه المادة وجميع اختباراتها؟")) return;
+    if (!confirm("Are you sure you want to delete this subject and all its quizzes?")) return;
     const data = await api(`/api/subjects?id=${id}`, { method: "DELETE" });
     if (data.error) { toast.error(data.error); return; }
-    toast.success("تم حذف المادة");
+    toast.success("Subject deleted");
     loadSubjects();
   };
 
   // Admin: Save quiz
   const saveQuiz = async () => {
-    if (!quizTitle.trim() || !quizSubjectId) { toast.error("بيانات غير مكتملة"); return; }
+    if (!quizTitle.trim() || !quizSubjectId) { toast.error("Please fill in all required fields"); return; }
     if (editQuiz) {
       await api("/api/quizzes", { method: "PUT", body: JSON.stringify({ id: editQuiz.id, title: quizTitle, description: quizDesc, durationMinutes: parseInt(quizDuration) || 40 }) });
-      toast.success("تم تعديل الاختبار");
+      toast.success("Quiz updated");
     } else {
       await api("/api/quizzes", { method: "POST", body: JSON.stringify({ title: quizTitle, description: quizDesc, durationMinutes: parseInt(quizDuration) || 40, subjectId: quizSubjectId }) });
-      toast.success("تم إضافة الاختبار");
+      toast.success("Quiz added");
     }
     setQuizDialog(false);
     setEditQuiz(null);
@@ -303,9 +303,9 @@ export default function QuizBank() {
 
   // Admin: Delete quiz
   const deleteQuiz = async (id: string) => {
-    if (!confirm("هل أنت متأكد من حذف هذا الاختبار؟")) return;
+    if (!confirm("Delete this quiz?")) return;
     await api(`/api/quizzes?id=${id}`, { method: "DELETE" });
-    toast.success("تم حذف الاختبار");
+    toast.success("Quiz deleted");
     loadSubjects();
   };
 
@@ -321,9 +321,9 @@ export default function QuizBank() {
     const data = await api("/api/import", { method: "POST", body: fd });
     if (data.questions) {
       setImportPreview(data.questions);
-      toast.success(`تم استخراج ${data.count} سؤال`);
+      toast.success(`Extracted ${data.count} questions`);
     } else {
-      toast.error(data.error || "فشل الاستيراد");
+      toast.error(data.error || "Import failed");
     }
     setImportLoading(false);
   };
@@ -341,17 +341,17 @@ export default function QuizBank() {
     fd.append("questions", JSON.stringify(importPreview));
     const data = await api("/api/import", { method: "POST", body: fd });
     if (data.status === "imported") {
-      toast.success(`تم استيراد ${data.count} سؤال بنجاح`);
+      toast.success(`Successfully imported ${data.count} questions`);
       setImportDialog(false);
       setImportPreview([]);
       loadSubjects();
     } else {
-      toast.error(data.error || "فشل الاستيراد");
+      toast.error(data.error || "Import failed");
     }
     setImportLoading(false);
   };
 
-  // Navigation helper
+  // Navigation helpers
   const goHome = () => { setView("home"); setCurrentSubject(null); setMobileMenuOpen(false); };
   const goToSubject = (subject: Subject) => {
     setCurrentSubject(subject);
@@ -374,7 +374,7 @@ export default function QuizBank() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">جاري التحميل...</p>
+          <p className="text-muted-foreground">Loading...</p>
         </div>
       </div>
     );
@@ -383,15 +383,15 @@ export default function QuizBank() {
   // ==================== RENDER ====================
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      {/* Top Bar */}
+      {/* ===== Top Bar ===== */}
       <header className="sticky top-0 z-50 bg-card border-b border-border shadow-sm">
         <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={() => { if (view !== "home") { goHome(); } else { setMobileMenuOpen(!mobileMenuOpen); } }} className="p-2 rounded-lg hover:bg-secondary transition-colors">
-              {view !== "home" ? <ChevronRight className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {view !== "home" ? <ChevronLeft className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
             <button onClick={goHome} className="font-bold text-lg hover:opacity-80 transition-opacity">
-              د. رحمة <span className="text-primary">·</span> بنك الأسئلة
+              Dr. Rahma <span className="text-primary">·</span> Quiz Bank
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -400,79 +400,91 @@ export default function QuizBank() {
                 {user.role === "student" && (
                   <Button variant="ghost" size="sm" onClick={goToDashboard} className="gap-1.5 text-sm">
                     <LayoutDashboard className="w-4 h-4" />
-                    <span className="hidden sm:inline">نتائجي</span>
+                    <span className="hidden sm:inline">My Results</span>
                   </Button>
                 )}
                 {user.role === "admin" && (
-                  <Button variant="ghost" size="sm" onClick={goToAdmin} className="gap-1.5 text-sm">
-                    <Shield className="w-4 h-4" />
-                    <span className="hidden sm:inline">لوحة التحكم</span>
-                  </Button>
+                  <>
+                    <Button variant="ghost" size="sm" onClick={goToDashboard} className="gap-1.5 text-sm">
+                      <BarChart3 className="w-4 h-4" />
+                      <span className="hidden sm:inline">Results</span>
+                    </Button>
+                    <Button size="sm" onClick={goToAdmin} className="gap-1.5 bg-primary">
+                      <Shield className="w-4 h-4" />
+                      <span className="hidden sm:inline">Teacher Panel</span>
+                    </Button>
+                  </>
                 )}
                 <div className="w-px h-6 bg-border mx-1" />
                 <Button variant="ghost" size="sm" onClick={logout} className="gap-1.5 text-sm text-destructive">
                   <LogOut className="w-4 h-4" />
-                  <span className="hidden sm:inline">خروج</span>
+                  <span className="hidden sm:inline">Logout</span>
                 </Button>
               </>
             ) : (
               <Button size="sm" onClick={() => setView("auth")} className="gap-1.5">
                 <LogIn className="w-4 h-4" />
-                <span>دخول</span>
+                <span>Login</span>
               </Button>
             )}
           </div>
         </div>
       </header>
 
-      {/* Mobile Menu Overlay */}
+      {/* ===== Mobile Menu ===== */}
       <AnimatePresence>
         {mobileMenuOpen && view === "home" && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="absolute top-14 right-0 left-0 z-40 bg-card border-b border-border shadow-lg p-4"
+            className="absolute top-14 left-0 right-0 z-40 bg-card border-b border-border shadow-lg p-4"
           >
             <div className="flex flex-col gap-2">
               {user?.role === "student" && (
                 <Button variant="ghost" className="justify-start gap-2" onClick={goToDashboard}>
-                  <LayoutDashboard className="w-4 h-4" /> نتائجي
+                  <LayoutDashboard className="w-4 h-4" /> My Results
                 </Button>
               )}
               {user?.role === "admin" && (
-                <Button variant="ghost" className="justify-start gap-2" onClick={goToAdmin}>
-                  <Shield className="w-4 h-4" /> لوحة التحكم
-                </Button>
+                <>
+                  <Button variant="ghost" className="justify-start gap-2" onClick={goToDashboard}>
+                    <BarChart3 className="w-4 h-4" /> Results
+                  </Button>
+                  <Button variant="ghost" className="justify-start gap-2" onClick={goToAdmin}>
+                    <Shield className="w-4 h-4" /> Teacher Panel
+                  </Button>
+                </>
               )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Main Content */}
+      {/* ===== Main Content ===== */}
       <main className="flex-1">
         <AnimatePresence mode="wait">
-          {/* ============ HOME VIEW ============ */}
+
+          {/* ========== HOME ========== */}
           {view === "home" && (
             <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
               <div className="mb-6">
-                <h1 className="text-2xl font-bold mb-1">المواد الدراسية</h1>
-                <p className="text-muted-foreground text-sm">اختر مادة لعرض الاختبارات المتاحة</p>
+                <h1 className="text-2xl font-bold mb-1">Subjects</h1>
+                <p className="text-muted-foreground text-sm">Pick a subject to see available quizzes</p>
               </div>
 
               {totalPending > 0 && user?.role === "student" && (
                 <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
                   className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2 text-sm">
                   <AlertTriangle className="w-4 h-4 text-primary" />
-                  <span>باقيلك <strong>{totalPending}</strong> اختبار لسه ما حليتهاش</span>
+                  <span>You have <strong>{totalPending}</strong> unfinished quiz{totalPending === 1 ? "" : "zes"}</span>
                 </motion.div>
               )}
 
               {subjects.length === 0 ? (
                 <Card className="p-6 text-center">
                   <BookOpen className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
-                  <p className="text-muted-foreground">لا توجد مواد بعد. يمكن إضافتها من لوحة التحكم.</p>
+                  <p className="text-muted-foreground">No subjects yet. The teacher can add them from the Teacher Panel.</p>
                 </Card>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -480,7 +492,7 @@ export default function QuizBank() {
                     <motion.button key={subject.id}
                       initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                       onClick={() => goToSubject(subject)}
-                      className="bg-card border border-border rounded-xl p-5 text-right hover:border-primary hover:shadow-md transition-all group"
+                      className="bg-card border border-border rounded-xl p-5 text-left hover:border-primary hover:shadow-md transition-all group"
                     >
                       <div className="flex items-start justify-between mb-2">
                         <FolderOpen className="w-5 h-5 text-primary group-hover:scale-110 transition-transform" />
@@ -490,9 +502,9 @@ export default function QuizBank() {
                         <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{subject.description}</p>
                       )}
                       <div className="flex gap-4 text-sm">
-                        <div className="font-mono text-primary font-semibold">{subject.quizCount}<span className="block text-xs text-muted-foreground font-sans font-normal">اختبار</span></div>
+                        <div className="font-mono text-primary font-semibold">{subject.quizCount}<span className="block text-xs text-muted-foreground font-sans font-normal">quiz{subject.quizCount === 1 ? "" : "zes"}</span></div>
                         {user?.role === "student" && subject.pendingQuizzes > 0 && (
-                          <div className="font-mono text-destructive font-semibold">{subject.pendingQuizzes}<span className="block text-xs text-muted-foreground font-sans font-normal">متبقي</span></div>
+                          <div className="font-mono text-destructive font-semibold">{subject.pendingQuizzes}<span className="block text-xs text-muted-foreground font-sans font-normal">remaining</span></div>
                         )}
                       </div>
                     </motion.button>
@@ -502,7 +514,7 @@ export default function QuizBank() {
             </motion.div>
           )}
 
-          {/* ============ SUBJECT VIEW ============ */}
+          {/* ========== SUBJECT ========== */}
           {view === "subject" && currentSubject && (
             <motion.div key="subject" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
               <div className="mb-6">
@@ -513,7 +525,7 @@ export default function QuizBank() {
               {quizzes.length === 0 ? (
                 <Card className="p-6 text-center">
                   <HelpCircle className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
-                  <p className="text-muted-foreground">لا توجد اختبارات في هذه المادة بعد.</p>
+                  <p className="text-muted-foreground">No quizzes available in this subject yet.</p>
                 </Card>
               ) : (
                 <div className="space-y-3">
@@ -526,15 +538,15 @@ export default function QuizBank() {
                           <h3 className="font-semibold mb-1">{quiz.title}</h3>
                           {quiz.description && <p className="text-sm text-muted-foreground mb-2">{quiz.description}</p>}
                           <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1"><HelpCircle className="w-3.5 h-3.5" /> {quiz.questionCount} سؤال</span>
-                            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {quiz.durationMinutes} دقيقة</span>
+                            <span className="flex items-center gap-1"><HelpCircle className="w-3.5 h-3.5" /> {quiz.questionCount} questions</span>
+                            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {quiz.durationMinutes} min</span>
                           </div>
                         </div>
                         {quiz.status === "submitted" ? (
-                          <Badge variant="secondary" className="bg-green-100 text-green-700 shrink-0">مكتمل ✓</Badge>
+                          <Badge variant="secondary" className="bg-green-100 text-green-700 shrink-0">Completed ✓</Badge>
                         ) : (
                           <Button onClick={() => startQuiz(quiz.id)} size="sm" className="shrink-0 gap-1.5">
-                            <Play className="w-4 h-4" /> ابدأ
+                            <Play className="w-4 h-4" /> Start
                           </Button>
                         )}
                       </div>
@@ -545,13 +557,13 @@ export default function QuizBank() {
             </motion.div>
           )}
 
-          {/* ============ QUIZ VIEW ============ */}
+          {/* ========== QUIZ ========== */}
           {view === "quiz" && (
             <motion.div key="quiz" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-4xl mx-auto px-4 py-6">
               {/* Quiz Header */}
               <div className="bg-card border border-border rounded-xl p-4 mb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <h1 className="font-bold text-lg">{quizData?.quiz.title || "الاختبار"}</h1>
+                  <h1 className="font-bold text-lg">{quizData?.quiz.title || "Quiz"}</h1>
                   {quizStarted && !quizSubmitted && (
                     <div className={`font-mono text-xl px-3 py-1.5 rounded-lg border ${timeRemaining < 60000 ? "bg-red-50 border-red-400 text-red-600 timer-pulse" : "bg-secondary border-primary/30 text-primary"}`}>
                       {fmtTime(timeRemaining)}
@@ -564,15 +576,15 @@ export default function QuizBank() {
                 {!quizStarted && !quizSubmitted && quizData && (
                   <div className="mt-4">
                     <div className="flex gap-6 py-3 border-y border-border mb-4">
-                      <div><span className="block font-mono text-xl text-primary">{quizData.questions.length}</span><span className="text-xs text-muted-foreground">سؤال</span></div>
-                      <div><span className="block font-mono text-xl text-primary">{quizData.quiz.durationMinutes}:00</span><span className="text-xs text-muted-foreground">الوقت المسموح</span></div>
-                      <div><span className="block font-mono text-xl text-primary">{quizData.questions.reduce((s, q) => s + q.points, 0)}</span><span className="text-xs text-muted-foreground">درجة</span></div>
+                      <div><span className="block font-mono text-xl text-primary">{quizData.questions.length}</span><span className="text-xs text-muted-foreground">questions</span></div>
+                      <div><span className="block font-mono text-xl text-primary">{quizData.quiz.durationMinutes}:00</span><span className="text-xs text-muted-foreground">time allowed</span></div>
+                      <div><span className="block font-mono text-xl text-primary">{quizData.questions.reduce((s, q) => s + q.points, 0)}</span><span className="text-xs text-muted-foreground">points</span></div>
                     </div>
-                    <p className="text-sm text-muted-foreground bg-secondary rounded-lg p-3 border-r-4 border-primary">
-                      إجاباتك تُحفظ تلقائيًا كل بضع ثوانٍ. عند انتهاء الوقت يتم التسليم تلقائيًا. الاختبار يمكن حله مرة واحدة فقط.
+                    <p className="text-sm text-muted-foreground bg-secondary rounded-lg p-3 border-l-4 border-primary">
+                      Your answers are auto-saved every few seconds. When time runs out, the quiz is submitted automatically. Each quiz can only be taken once.
                     </p>
                     <Button onClick={() => startQuiz(quizData.quiz.id)} className="mt-4 gap-2 w-full sm:w-auto">
-                      <Play className="w-4 h-4" /> ابدأ الاختبار ({quizData.quiz.durationMinutes} دقيقة)
+                      <Play className="w-4 h-4" /> Start Quiz ({quizData.quiz.durationMinutes} min)
                     </Button>
                   </div>
                 )}
@@ -583,7 +595,7 @@ export default function QuizBank() {
                 <div className="mb-4">
                   <Progress value={quizAnswers.filter(a => a !== null).length / (quizData?.questions.length || 1) * 100} className="h-2" />
                   <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>{quizAnswers.filter(a => a !== null).length} / {quizData?.questions.length} تم الإجابة</span>
+                    <span>{quizAnswers.filter(a => a !== null).length} / {quizData?.questions.length} answered</span>
                     <span></span>
                   </div>
                 </div>
@@ -596,14 +608,14 @@ export default function QuizBank() {
                     <motion.div key={q.id} id={`q-${qi}`} className={`bg-card border rounded-xl p-4 scroll-mt-40 transition-colors ${quizAnswers[qi] !== null ? "border-primary" : "border-border"}`}>
                       {q.imageUrl && (
                         <div className="mb-3 rounded-lg overflow-hidden bg-secondary">
-                          <img src={q.imageUrl} alt="صورة السؤال" className="max-h-64 w-auto mx-auto object-contain" />
+                          <img src={q.imageUrl} alt="Question image" className="max-h-64 w-auto mx-auto object-contain" />
                         </div>
                       )}
                       <div className="flex items-start gap-2 mb-3">
                         <span className="flex items-center justify-center w-6 h-6 rounded-full bg-secondary text-primary text-xs font-bold shrink-0 mt-0.5">{qi + 1}</span>
-                        <p className="font-medium text-sm leading-relaxed">{q.text}{q.points > 1 ? ` (${q.points} درجة)` : ""}</p>
+                        <p className="font-medium text-sm leading-relaxed">{q.text}{q.points > 1 ? ` (${q.points} pts)` : ""}</p>
                       </div>
-                      <div className="space-y-1.5 mr-8">
+                      <div className="space-y-1.5 ml-8">
                         {q.choices.map((choice, ci) => (
                           <label key={ci} className={`quiz-choice flex items-center gap-3 p-2.5 rounded-lg border ${quizAnswers[qi] === ci ? "selected border-primary bg-secondary" : "border-transparent"}`} onClick={() => {
                             const newAnswers = [...quizAnswers];
@@ -626,8 +638,8 @@ export default function QuizBank() {
               {quizStarted && !quizSubmitted && (
                 <div className="sticky bottom-0 bg-background/80 backdrop-blur-sm pt-4 pb-2 mt-4">
                   <div className="flex gap-2">
-                    <Button variant="outline" onClick={saveProgress} className="gap-1.5"><Save className="w-4 h-4" /> حفظ</Button>
-                    <Button onClick={() => submitQuiz(false)} className="flex-1 gap-1.5"><Send className="w-4 h-4" /> تسليم الاختبار</Button>
+                    <Button variant="outline" onClick={saveProgress} className="gap-1.5"><Save className="w-4 h-4" /> Save</Button>
+                    <Button onClick={() => submitQuiz(false)} className="flex-1 gap-1.5"><Send className="w-4 h-4" /> Submit Quiz</Button>
                   </div>
                 </div>
               )}
@@ -638,7 +650,7 @@ export default function QuizBank() {
                   <div className="bg-card border border-border rounded-xl p-6 text-center mb-6">
                     <Award className="w-12 h-12 mx-auto mb-3 text-primary" />
                     <div className="font-mono text-4xl font-bold text-primary">{reviewData.score} / {reviewData.totalPoints}</div>
-                    <p className="text-muted-foreground mt-1">{reviewData.percent}% صحيح</p>
+                    <p className="text-muted-foreground mt-1">{reviewData.percent}% correct</p>
                   </div>
                   <div className="space-y-4">
                     {reviewData.questions.map((q, qi) => {
@@ -646,18 +658,18 @@ export default function QuizBank() {
                       return (
                         <div key={q.id} className={`bg-card border rounded-xl p-4 ${isCorrect ? "border-green-500 bg-green-50" : "border-red-400 bg-red-50"}`}>
                           <div className={`text-xs font-bold uppercase tracking-wide mb-2 ${isCorrect ? "text-green-600" : "text-red-600"}`}>
-                            {isCorrect ? "✓ صحيح" : (q.picked === null ? "لم يتم الإجابة" : "✗ خطأ")}
+                            {isCorrect ? "✓ Correct" : (q.picked === null ? "No answer" : "✗ Incorrect")}
                           </div>
                           {q.imageUrl && (
                             <div className="mb-3 rounded-lg overflow-hidden bg-white">
-                              <img src={q.imageUrl} alt="صورة السؤال" className="max-h-48 w-auto mx-auto object-contain" />
+                              <img src={q.imageUrl} alt="Question image" className="max-h-48 w-auto mx-auto object-contain" />
                             </div>
                           )}
                           <div className="flex items-start gap-2 mb-3">
                             <span className="flex items-center justify-center w-6 h-6 rounded-full bg-white text-primary text-xs font-bold shrink-0">{qi + 1}</span>
                             <p className="font-medium text-sm">{q.text}</p>
                           </div>
-                          <div className="space-y-1.5 mr-8">
+                          <div className="space-y-1.5 ml-8">
                             {q.choices.map((c, ci) => (
                               <div key={c.id} className={`p-2.5 rounded-lg text-sm ${ci === q.correct ? "font-bold text-green-700 bg-green-100" : ci === q.picked && !isCorrect ? "line-through text-red-600 bg-red-100" : "text-muted-foreground"}`}>
                                 {c.text}{ci === q.correct ? " ✓" : ""}{ci === q.picked && !isCorrect ? " ✗" : ""}
@@ -669,34 +681,34 @@ export default function QuizBank() {
                     })}
                   </div>
                   <div className="text-center mt-6">
-                    <Button onClick={goHome} className="gap-2">العودة للرئيسية</Button>
+                    <Button onClick={goHome} className="gap-2">Back to Home</Button>
                   </div>
                 </div>
               )}
             </motion.div>
           )}
 
-          {/* ============ DASHBOARD VIEW ============ */}
+          {/* ========== DASHBOARD ========== */}
           {view === "dashboard" && user?.role === "student" && (
             <motion.div key="dashboard" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
               <div className="mb-6">
-                <h1 className="text-2xl font-bold mb-1">لوحة نتائجي</h1>
-                <p className="text-muted-foreground text-sm">مرحباً {user.name || user.email}</p>
+                <h1 className="text-2xl font-bold mb-1">My Results</h1>
+                <p className="text-muted-foreground text-sm">Hello, {user.name || user.email}</p>
               </div>
 
               {totalPending > 0 && (
                 <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
                   className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2 text-sm">
                   <AlertTriangle className="w-4 h-4 text-primary" />
-                  <span>باقيلك <strong>{totalPending}</strong> اختبار لسه ما حليتهاش</span>
-                  <Button variant="ghost" size="sm" onClick={goHome} className="mr-auto text-primary">عرض المواد</Button>
+                  <span>You have <strong>{totalPending}</strong> unfinished quiz{totalPending === 1 ? "" : "zes"}</span>
+                  <Button variant="ghost" size="sm" onClick={goHome} className="ml-auto text-primary">View Subjects</Button>
                 </motion.div>
               )}
 
               {attempts.length === 0 ? (
                 <Card className="p-6 text-center">
                   <BarChart3 className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
-                  <p className="text-muted-foreground">لا توجد نتائج بعد. ابدأ بحل اختبار!</p>
+                  <p className="text-muted-foreground">No results yet. Start a quiz to see your scores!</p>
                 </Card>
               ) : (
                 <div className="space-y-3">
@@ -706,14 +718,14 @@ export default function QuizBank() {
                     >
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-sm truncate">{attempt.quiz.title}</h3>
-                        <p className="text-xs text-muted-foreground mt-0.5">{attempt.quiz.subjectName} • {new Date(attempt.submittedAt).toLocaleDateString("ar-EG")}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{attempt.quiz.subjectName} • {new Date(attempt.submittedAt).toLocaleDateString()}</p>
                       </div>
                       <div className="text-center shrink-0">
                         <div className={`font-mono text-xl font-bold ${attempt.percent >= 60 ? "text-green-600" : "text-destructive"}`}>{attempt.percent}%</div>
                         <div className="text-xs text-muted-foreground">{attempt.score}/{attempt.totalPoints}</div>
                       </div>
                       <Button variant="ghost" size="sm" onClick={() => showReview(attempt.id)} className="shrink-0 gap-1">
-                        <Eye className="w-4 h-4" /> مراجعة
+                        <Eye className="w-4 h-4" /> Review
                       </Button>
                     </motion.div>
                   ))}
@@ -722,7 +734,7 @@ export default function QuizBank() {
             </motion.div>
           )}
 
-          {/* ============ AUTH VIEW ============ */}
+          {/* ========== AUTH ========== */}
           {view === "auth" && !user && (
             <motion.div key="auth" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="max-w-sm mx-auto px-4 py-16">
               <Card className="p-6">
@@ -730,71 +742,71 @@ export default function QuizBank() {
                   <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
                     {authMode === "login" ? <LogIn className="w-6 h-6 text-primary" /> : <UserPlus className="w-6 h-6 text-primary" />}
                   </div>
-                  <h2 className="text-xl font-bold">{authMode === "login" ? "تسجيل الدخول" : "حساب جديد"}</h2>
+                  <h2 className="text-xl font-bold">{authMode === "login" ? "Sign In" : "Create Account"}</h2>
                 </div>
 
                 <div className="space-y-4">
                   {authMode === "register" && (
                     <div>
-                      <Label>الاسم</Label>
-                      <Input placeholder="الاسم الكامل" value={authName} onChange={e => setAuthName(e.target.value)} className="mt-1" />
+                      <Label>Full Name</Label>
+                      <Input placeholder="John Doe" value={authName} onChange={e => setAuthName(e.target.value)} className="mt-1" />
                     </div>
                   )}
                   <div>
-                    <Label>البريد الإلكتروني</Label>
-                    <Input type="email" placeholder="example@email.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="mt-1" dir="ltr" />
+                    <Label>Email</Label>
+                    <Input type="email" placeholder="you@example.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="mt-1" />
                   </div>
                   <div>
-                    <Label>كلمة السر</Label>
-                    <Input type="password" placeholder="••••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" dir="ltr" />
+                    <Label>Password</Label>
+                    <Input type="password" placeholder="••••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" />
                   </div>
                   <Button onClick={handleAuth} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
                     {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
-                    {authMode === "login" ? "تسجيل الدخول" : "إنشاء حساب"}
+                    {authMode === "login" ? "Sign In" : "Create Account"}
                   </Button>
                 </div>
 
                 <div className="mt-4 text-center text-sm">
                   <button onClick={() => setAuthMode(authMode === "login" ? "register" : "login")} className="text-primary font-semibold hover:underline">
-                    {authMode === "login" ? "ليس لديك حساب؟ سجل الآن" : "لديك حساب؟ سجل دخول"}
+                    {authMode === "login" ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
                   </button>
                 </div>
               </Card>
             </motion.div>
           )}
 
-          {/* ============ ADMIN VIEW ============ */}
+          {/* ========== ADMIN ========== */}
           {view === "admin" && user?.role === "admin" && (
             <motion.div key="admin" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
               <div className="mb-6">
-                <h1 className="text-2xl font-bold mb-1">لوحة التحكم</h1>
-                <p className="text-muted-foreground text-sm">مرحباً {user.name || user.email} — إدارة المواد والاختبارات</p>
+                <h1 className="text-2xl font-bold mb-1">Teacher Panel</h1>
+                <p className="text-muted-foreground text-sm">Hello, {user.name || user.email} — manage subjects, quizzes & questions</p>
               </div>
 
               <Tabs value={adminTab} onValueChange={setAdminTab}>
                 <TabsList className="w-full mb-6">
-                  <TabsTrigger value="subjects" className="flex-1 gap-1.5"><FolderOpen className="w-4 h-4" /> المواد</TabsTrigger>
-                  <TabsTrigger value="quizzes" className="flex-1 gap-1.5"><FileText className="w-4 h-4" /> الاختبارات</TabsTrigger>
-                  <TabsTrigger value="import" className="flex-1 gap-1.5"><Upload className="w-4 h-4" /> استيراد</TabsTrigger>
+                  <TabsTrigger value="subjects" className="flex-1 gap-1.5"><FolderOpen className="w-4 h-4" /> Subjects</TabsTrigger>
+                  <TabsTrigger value="quizzes" className="flex-1 gap-1.5"><FileText className="w-4 h-4" /> Quizzes</TabsTrigger>
+                  <TabsTrigger value="import" className="flex-1 gap-1.5"><Upload className="w-4 h-4" /> Import</TabsTrigger>
                 </TabsList>
 
                 {/* Subjects Tab */}
                 <TabsContent value="subjects">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="font-semibold">المواد ({subjects.length})</h2>
+                    <h2 className="font-semibold">Subjects ({subjects.length})</h2>
                     <Button size="sm" onClick={() => { setEditSubject(null); setSubjectName(""); setSubjectDesc(""); setSubjectDialog(true); }} className="gap-1.5">
-                      <Plus className="w-4 h-4" /> إضافة مادة
+                      <Plus className="w-4 h-4" /> Add Subject
                     </Button>
                   </div>
                   {subjects.length === 0 ? (
-                    <Card className="p-6 text-center text-muted-foreground">لا توجد مواد بعد</Card>
+                    <Card className="p-6 text-center text-muted-foreground">No subjects yet</Card>
                   ) : (
                     <div className="space-y-2">
                       {subjects.map((s) => (
                         <div key={s.id} className="bg-card border border-border rounded-lg p-3 flex items-center justify-between">
                           <div>
                             <h3 className="font-semibold text-sm">{s.name}</h3>
-                            <p className="text-xs text-muted-foreground">{s.description || "بدون وصف"} • {s.quizCount} اختبار</p>
+                            <p className="text-xs text-muted-foreground">{s.description || "No description"} • {s.quizCount} quiz{ s.quizCount === 1 ? "" : "zes"}</p>
                           </div>
                           <div className="flex gap-1">
                             <Button variant="ghost" size="sm" onClick={() => { setEditSubject(s); setSubjectName(s.name); setSubjectDesc(s.description || ""); setSubjectDialog(true); }}><Edit3 className="w-4 h-4" /></Button>
@@ -809,13 +821,13 @@ export default function QuizBank() {
                 {/* Quizzes Tab */}
                 <TabsContent value="quizzes">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="font-semibold">الاختبارات</h2>
+                    <h2 className="font-semibold">Quizzes</h2>
                     <Button size="sm" onClick={() => { setEditQuiz(null); setQuizTitle(""); setQuizDesc(""); setQuizDuration("40"); setQuizSubjectId(subjects[0]?.id || ""); setQuizDialog(true); }} className="gap-1.5">
-                      <Plus className="w-4 h-4" /> إضافة اختبار
+                      <Plus className="w-4 h-4" /> Add Quiz
                     </Button>
                   </div>
                   {subjects.length === 0 ? (
-                    <Card className="p-6 text-center text-muted-foreground">أضف مواد أولاً ثم أنشئ اختبارات</Card>
+                    <Card className="p-6 text-center text-muted-foreground">Add subjects first, then create quizzes</Card>
                   ) : (
                     <div className="space-y-2">
                       {subjects.map((s) => (
@@ -826,7 +838,7 @@ export default function QuizBank() {
                               <div key={q.id} className="bg-card border border-border rounded-lg p-3 mb-2 flex items-center justify-between">
                                 <div>
                                   <h4 className="font-semibold text-sm">{q.title}</h4>
-                                  <p className="text-xs text-muted-foreground">{q.questionCount} سؤال • {q.durationMinutes} دقيقة • {q.attemptCount} محاولة</p>
+                                  <p className="text-xs text-muted-foreground">{q.questionCount} questions • {q.durationMinutes} min • {q.attemptCount} attempt{q.attemptCount === 1 ? "" : "s"}</p>
                                 </div>
                                 <div className="flex gap-1">
                                   <Button variant="ghost" size="sm" onClick={() => { setEditQuiz(q); setQuizTitle(q.title); setQuizDesc(q.description || ""); setQuizDuration(String(q.durationMinutes)); setQuizSubjectId(s.id); setQuizDialog(true); }}><Edit3 className="w-4 h-4" /></Button>
@@ -844,35 +856,35 @@ export default function QuizBank() {
                 {/* Import Tab */}
                 <TabsContent value="import">
                   <div className="mb-4">
-                    <h2 className="font-semibold mb-1">استيراد أسئلة</h2>
-                    <p className="text-sm text-muted-foreground">ارفع ملف وورد (docx) أو إكسل (xlsx) لاستيراد الأسئلة تلقائيًا</p>
+                    <h2 className="font-semibold mb-1">Import Questions</h2>
+                    <p className="text-sm text-muted-foreground">Upload a Word (.docx) or Excel (.xlsx) file to auto-import questions</p>
                   </div>
                   <Card className="p-5">
                     <div className="space-y-4">
                       <div>
-                        <Label>اختر الاختبار</Label>
+                        <Label>Select Quiz</Label>
                         <select value={importQuizId} onChange={e => setImportQuizId(e.target.value)} className="w-full mt-1 p-2.5 border border-border rounded-lg text-sm bg-background">
-                          <option value="">-- اختر اختبار --</option>
+                          <option value="">-- Select a quiz --</option>
                           {subjects.flatMap(s => s.quizzes.map(q => ({ ...q, subjectName: s.name }))).map(q => (
                             <option key={q.id} value={q.id}>{q.subjectName} — {q.title}</option>
                           ))}
                         </select>
                       </div>
                       <div>
-                        <Label>رفع ملف</Label>
+                        <Label>Upload File</Label>
                         <div className="mt-1 border-2 border-dashed border-border rounded-lg p-6 text-center">
                           <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                          <p className="text-sm text-muted-foreground mb-2">اسحب الملف هنا أو انقر للاختيار</p>
+                          <p className="text-sm text-muted-foreground mb-2">Drag & drop or click to choose</p>
                           <input ref={importFileRef} type="file" accept=".docx,.xlsx,.xls" onChange={handleImportPreview} className="text-sm" />
                         </div>
                       </div>
 
-                      {importLoading && <div className="text-center text-sm text-muted-foreground">جاري التحليل...</div>}
+                      {importLoading && <div className="text-center text-sm text-muted-foreground">Processing...</div>}
 
                       {importPreview.length > 0 && (
                         <div>
                           <div className="flex items-center justify-between mb-2">
-                            <h3 className="font-semibold text-sm">معاينة ({importPreview.length} سؤال)</h3>
+                            <h3 className="font-semibold text-sm">Preview ({importPreview.length} questions)</h3>
                           </div>
                           <div className="max-h-96 overflow-y-auto custom-scroll space-y-2 border border-border rounded-lg p-3">
                             {importPreview.map((q, i) => (
@@ -882,7 +894,7 @@ export default function QuizBank() {
                                   <p className="text-sm font-medium">{q.text}</p>
                                 </div>
                                 {q.imageUrl && <img src={q.imageUrl} alt="" className="max-h-32 rounded-lg mb-2" />}
-                                <div className="mr-7 space-y-1">
+                                <div className="ml-7 space-y-1">
                                   {q.choices.map((c, ci) => (
                                     <div key={ci} className={`text-xs p-1.5 rounded ${c.isCorrect ? "bg-green-100 text-green-700 font-bold" : "text-muted-foreground"}`}>
                                       {String.fromCharCode(65 + ci)}) {c.text} {c.isCorrect ? "✓" : ""}
@@ -895,9 +907,9 @@ export default function QuizBank() {
                           <div className="flex gap-2 mt-4">
                             <Button onClick={confirmImport} disabled={importLoading} className="flex-1 gap-1.5">
                               {importLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                              تأكيد الاستيراد
+                              Confirm Import
                             </Button>
-                            <Button variant="outline" onClick={() => setImportPreview([])}>إلغاء</Button>
+                            <Button variant="outline" onClick={() => setImportPreview([])}>Cancel</Button>
                           </div>
                         </div>
                       )}
@@ -910,47 +922,47 @@ export default function QuizBank() {
         </AnimatePresence>
       </main>
 
-      {/* Subject Dialog */}
+      {/* ===== Subject Dialog ===== */}
       <Dialog open={subjectDialog} onOpenChange={setSubjectDialog}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{editSubject ? "تعديل المادة" : "إضافة مادة جديدة"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editSubject ? "Edit Subject" : "Add New Subject"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label>اسم المادة</Label><Input value={subjectName} onChange={e => setSubjectName(e.target.value)} placeholder="مثال: التشريح" className="mt-1" /></div>
-            <div><Label>الوصف (اختياري)</Label><Input value={subjectDesc} onChange={e => setSubjectDesc(e.target.value)} placeholder="وصف مختصر للمادة" className="mt-1" /></div>
+            <div><Label>Subject Name</Label><Input value={subjectName} onChange={e => setSubjectName(e.target.value)} placeholder="e.g. Anatomy" className="mt-1" /></div>
+            <div><Label>Description (optional)</Label><Input value={subjectDesc} onChange={e => setSubjectDesc(e.target.value)} placeholder="Brief description" className="mt-1" /></div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSubjectDialog(false)}>إلغاء</Button>
-            <Button onClick={saveSubject} disabled={!subjectName.trim()}>حفظ</Button>
+            <Button variant="outline" onClick={() => setSubjectDialog(false)}>Cancel</Button>
+            <Button onClick={saveSubject} disabled={!subjectName.trim()}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Quiz Dialog */}
+      {/* ===== Quiz Dialog ===== */}
       <Dialog open={quizDialog} onOpenChange={setQuizDialog}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{editQuiz ? "تعديل الاختبار" : "إضافة اختبار جديد"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editQuiz ? "Edit Quiz" : "Add New Quiz"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label>المادة</Label>
+              <Label>Subject</Label>
               <select value={quizSubjectId} onChange={e => setQuizSubjectId(e.target.value)} className="w-full mt-1 p-2.5 border border-border rounded-lg text-sm bg-background">
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
-            <div><Label>عنوان الاختبار</Label><Input value={quizTitle} onChange={e => setQuizTitle(e.target.value)} placeholder="مثال: اختبار الوحدة الأولى" className="mt-1" /></div>
-            <div><Label>الوصف (اختياري)</Label><Input value={quizDesc} onChange={e => setQuizDesc(e.target.value)} placeholder="وصف مختصر" className="mt-1" /></div>
-            <div><Label>مدة الاختبار (دقيقة)</Label><Input type="number" value={quizDuration} onChange={e => setQuizDuration(e.target.value)} className="mt-1" dir="ltr" /></div>
+            <div><Label>Quiz Title</Label><Input value={quizTitle} onChange={e => setQuizTitle(e.target.value)} placeholder="e.g. Unit 1 Quiz" className="mt-1" /></div>
+            <div><Label>Description (optional)</Label><Input value={quizDesc} onChange={e => setQuizDesc(e.target.value)} placeholder="Brief description" className="mt-1" /></div>
+            <div><Label>Duration (minutes)</Label><Input type="number" value={quizDuration} onChange={e => setQuizDuration(e.target.value)} className="mt-1" /></div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setQuizDialog(false)}>إلغاء</Button>
-            <Button onClick={saveQuiz} disabled={!quizTitle.trim() || !quizSubjectId}>حفظ</Button>
+            <Button variant="outline" onClick={() => setQuizDialog(false)}>Cancel</Button>
+            <Button onClick={saveQuiz} disabled={!quizTitle.trim() || !quizSubjectId}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Footer */}
+      {/* ===== Footer ===== */}
       <footer className="mt-auto border-t border-border bg-card py-4">
         <div className="max-w-4xl mx-auto px-4 text-center text-xs text-muted-foreground">
-          د. رحمة — بنك الأسئلة © {new Date().getFullYear()}
+          Dr. Rahma — Quiz Bank © {new Date().getFullYear()}
         </div>
       </footer>
     </div>

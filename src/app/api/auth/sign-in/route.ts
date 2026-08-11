@@ -6,15 +6,15 @@ export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json();
     if (!email || !password) {
-      return NextResponse.json({ error: 'البريد الإلكتروني وكلمة السر مطلوبان' }, { status: 400 });
+      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
     const user = await db.user.findUnique({ where: { email: email.toLowerCase().trim() } });
     if (!user) {
-      return NextResponse.json({ error: 'بيانات الدخول غير صحيحة' }, { status: 401 });
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
     const valid = await comparePassword(password, user.password);
     if (!valid) {
-      return NextResponse.json({ error: 'بيانات الدخول غير صحيحة' }, { status: 401 });
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
     const token = generateToken({ userId: user.id, email: user.email, role: user.role });
     return NextResponse.json({
@@ -23,6 +23,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Sign-in error:', error);
-    return NextResponse.json({ error: 'حدث خطأ أثناء تسجيل الدخول' }, { status: 500 });
+    return NextResponse.json({ error: 'Login failed' }, { status: 500 });
   }
 }

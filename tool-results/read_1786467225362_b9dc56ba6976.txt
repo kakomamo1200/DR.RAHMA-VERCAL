@@ -1,0 +1,959 @@
+     1→"use client";
+     2→
+     3→import { useState, useEffect, useCallback, useRef } from "react";
+     4→import { motion, AnimatePresence } from "framer-motion";
+     5→import {
+     6→  BookOpen, Clock, CheckCircle2, XCircle, LogIn, LogOut, UserPlus,
+     7→  LayoutDashboard, Shield, Plus, Trash2, Edit3, Upload, FileText,
+     8→  ChevronLeft, ChevronRight, ArrowRight, BarChart3, Timer,
+     9→  AlertTriangle, Eye, Play, Save, Send, Menu, X, Home,
+    10→  FolderOpen, HelpCircle, Award, Users, Settings
+    11→} from "lucide-react";
+    12→import { Button } from "@/components/ui/button";
+    13→import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+    14→import { Input } from "@/components/ui/input";
+    15→import { Label } from "@/components/ui/label";
+    16→import { Badge } from "@/components/ui/badge";
+    17→import { Progress } from "@/components/ui/progress";
+    18→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    19→import {
+    20→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+    21→} from "@/components/ui/dialog";
+    22→import { toast } from "sonner";
+    23→
+    24→// ============ Types ============
+    25→type User = { id: string; email: string; name: string | null; role: string };
+    26→type Subject = { id: string; name: string; description: string | null; quizCount: number; pendingQuizzes: number; quizzes: Quiz[] };
+    27→type Quiz = { id: string; title: string; description: string | null; durationMinutes: number; questionCount: number; attemptCount: number; subjectName: string; order: number; status: string | null };
+    28→type QuizQuestion = { id: string; text: string; imageUrl: string | null; points: number; choices: string[] };
+    29→type ReviewQuestion = { id: string; text: string; imageUrl: string | null; points: number; choices: { id: string; text: string; isCorrect: boolean }[]; correct: number; picked: number | null };
+    30→type AttemptResult = { id: string; score: number; totalPoints: number; startedAt: string; submittedAt: string; quiz: { id: string; title: string; subjectName: string }; percent: number };
+    31→type ImportQuestion = { text: string; imageUrl: string | null; choices: { text: string; isCorrect: boolean }[] };
+    32→
+    33→type View = "home" | "subject" | "quiz" | "dashboard" | "admin" | "auth";
+    34→
+    35→// ============ API Helper ============
+    36→async function api(path: string, options?: RequestInit) {
+    37→  const token = typeof window !== "undefined" ? localStorage.getItem("quiz_token") : null;
+    38→  const res = await fetch(path, {
+    39→    ...options,
+    40→    headers: {
+    41→      ...options?.headers,
+    42→      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    43→      ...(options?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+    44→    },
+    45→  });
+    46→  return res.json();
+    47→}
+    48→
+    49→// ============ Main Component ============
+    50→export default function QuizBank() {
+    51→  const [user, setUser] = useState<User | null>(null);
+    52→  const [view, setView] = useState<View>("home");
+    53→  const [loading, setLoading] = useState(true);
+    54→  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    55→
+    56→  // Data states
+    57→  const [subjects, setSubjects] = useState<Subject[]>([]);
+    58→  const [currentSubject, setCurrentSubject] = useState<Subject | null>(null);
+    59→  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+    60→  const [attempts, setAttempts] = useState<AttemptResult[]>([]);
+    61→
+    62→  // Quiz running state
+    63→  const [quizData, setQuizData] = useState<{ quiz: { id: string; title: string; description: string | null; durationMinutes: number }; questions: QuizQuestion[] } | null>(null);
+    64→  const [quizAnswers, setQuizAnswers] = useState<(number | null)[]>([]);
+    65→  const [attemptId, setAttemptId] = useState<string | null>(null);
+    66→  const [quizStarted, setQuizStarted] = useState(false);
+    67→  const [quizSubmitted, setQuizSubmitted] = useState(false);
+    68→  const [quizStartTime, setQuizStartTime] = useState(0);
+    69→  const [serverTimeOffset, setServerTimeOffset] = useState(0);
+    70→  const [timeRemaining, setTimeRemaining] = useState(0);
+    71→  const [reviewData, setReviewData] = useState<{ score: number; totalPoints: number; percent: number; questions: ReviewQuestion[] } | null>(null);
+    72→
+    73→  // Auth form state
+    74→  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+    75→  const [authEmail, setAuthEmail] = useState("");
+    76→  const [authPassword, setAuthPassword] = useState("");
+    77→  const [authName, setAuthName] = useState("");
+    78→  const [authLoading, setAuthLoading] = useState(false);
+    79→
+    80→  // Admin states
+    81→  const [adminTab, setAdminTab] = useState("subjects");
+    82→  const [subjectDialog, setSubjectDialog] = useState(false);
+    83→  const [editSubject, setEditSubject] = useState<Subject | null>(null);
+    84→  const [subjectName, setSubjectName] = useState("");
+    85→  const [subjectDesc, setSubjectDesc] = useState("");
+    86→  const [quizDialog, setQuizDialog] = useState(false);
+    87→  const [editQuiz, setEditQuiz] = useState<Quiz | null>(null);
+    88→  const [quizTitle, setQuizTitle] = useState("");
+    89→  const [quizDesc, setQuizDesc] = useState("");
+    90→  const [quizDuration, setQuizDuration] = useState("40");
+    91→  const [quizSubjectId, setQuizSubjectId] = useState("");
+    92→  const [importDialog, setImportDialog] = useState(false);
+    93→  const [importQuizId, setImportQuizId] = useState("");
+    94→  const [importPreview, setImportPreview] = useState<ImportQuestion[]>([]);
+    95→  const [importLoading, setImportLoading] = useState(false);
+    96→  const importFileRef = useRef<HTMLInputElement>(null);
+    97→  const confirmFileRef = useRef<HTMLInputElement>(null);
+    98→
+    99→  // Timer
+   100→  const timerRef = useRef<NodeJS.Timeout | null>(null);
+   101→  const submitQuizRef = useRef<(auto: boolean) => Promise<void>>();
+   102→
+   103→  // Load user on mount
+   104→  useEffect(() => {
+   105→    const token = localStorage.getItem("quiz_token");
+   106→    if (token) {
+   107→      api("/api/auth/me").then((data) => {
+   108→        if (data.user) {
+   109→          setUser(data.user);
+   110→        } else {
+   111→          localStorage.removeItem("quiz_token");
+   112→        }
+   113→        setLoading(false);
+   114→      }).catch(() => setLoading(false));
+   115→    } else {
+   116→      setLoading(false);
+   117→    }
+   118→  }, []);
+   119→
+   120→  // Load subjects
+   121→  const loadSubjects = useCallback(async () => {
+   122→    const data = await api("/api/subjects");
+   123→    if (data.subjects) setSubjects(data.subjects);
+   124→  }, []);
+   125→
+   126→  useEffect(() => { loadSubjects(); }, [loadSubjects]);
+   127→
+   128→  // Load dashboard attempts
+   129→  const loadDashboard = useCallback(async () => {
+   130→    if (!user) return;
+   131→    const data = await api(`/api/attempts?type=dashboard`);
+   132→    if (data.attempts) setAttempts(data.attempts);
+   133→  }, [user]);
+   134→
+   135→  // Load quizzes for a subject
+   136→  const loadSubjectQuizzes = useCallback(async (subjectId: string) => {
+   137→    const data = await api(`/api/quizzes?subjectId=${subjectId}`);
+   138→    if (data.quizzes) {
+   139→      setQuizzes(data.quizzes);
+   140→      const sub = subjects.find(s => s.id === subjectId);
+   141→      if (sub) setCurrentSubject({ ...sub, quizzes: data.quizzes });
+   142→    }
+   143→  }, [subjects]);
+   144→
+   145→  // Timer for quiz
+   146→  useEffect(() => {
+   147→    if (!quizStarted || quizSubmitted) return;
+   148→    timerRef.current = setInterval(() => {
+   149→      const now = Date.now() + serverTimeOffset;
+   150→      const durationMs = (quizData?.quiz.durationMinutes || 40) * 60 * 1000;
+   151→      const elapsed = now - quizStartTime;
+   152→      const remaining = Math.max(0, durationMs - elapsed);
+   153→      setTimeRemaining(remaining);
+   154→      if (remaining <= 0) {
+   155→        submitQuizRef.current?.(true);
+   156→      }
+   157→    }, 250);
+   158→    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+   159→  }, [quizStarted, quizSubmitted, quizStartTime, serverTimeOffset, quizData]);
+   160→
+   161→  // Format time
+   162→  const fmtTime = (ms: number) => {
+   163→    const sec = Math.max(0, Math.round(ms / 1000));
+   164→    const m = Math.floor(sec / 60);
+   165→    const s = sec % 60;
+   166→    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+   167→  };
+   168→
+   169→  // Auth handlers
+   170→  const handleAuth = async () => {
+   171→    setAuthLoading(true);
+   172→    const endpoint = authMode === "login" ? "/api/auth/sign-in" : "/api/auth/sign-up";
+   173→    const body = authMode === "login"
+   174→      ? { email: authEmail, password: authPassword }
+   175→      : { email: authEmail, password: authPassword, name: authName };
+   176→    const data = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
+   177→    if (data.user) {
+   178→      localStorage.setItem("quiz_token", data.token);
+   179→      setUser(data.user);
+   180→      setView("home");
+   181→      toast.success(data.user.role === "admin" ? "تم تسجيل الدخول كأدمن" : "تم تسجيل الدخول بنجاح");
+   182→      setAuthEmail(""); setAuthPassword(""); setAuthName("");
+   183→    } else {
+   184→      toast.error(data.error || "حدث خطأ");
+   185→    }
+   186→    setAuthLoading(false);
+   187→  };
+   188→
+   189→  const logout = () => {
+   190→    localStorage.removeItem("quiz_token");
+   191→    setUser(null);
+   192→    setView("home");
+   193→    setMobileMenuOpen(false);
+   194→    toast.success("تم تسجيل الخروج");
+   195→  };
+   196→
+   197→  // Show review (declared first for hoisting)
+   198→  const showReview = async (aid: string) => {
+   199→    setView("quiz");
+   200→    const data = await api(`/api/attempts?type=review&attemptId=${aid}`);
+   201→    if (data.questions) {
+   202→      setReviewData(data);
+   203→      setQuizSubmitted(true);
+   204→      setQuizStarted(false);
+   205→    }
+   206→  };
+   207→
+   208→  // Submit quiz
+   209→  const submitQuiz = async (auto = false) => {
+   210→    submitQuizRef.current = submitQuiz;
+   211→    if (quizSubmitted || !attemptId) return;
+   212→    if (timerRef.current) clearInterval(timerRef.current);
+   213→    const unanswered = quizAnswers.filter(a => a === null || a === undefined).length;
+   214→    if (!auto && unanswered > 0) {
+   215→      if (!confirm(`لا يزال لديك ${unanswered} سؤال بدون إجابة. هل تريد التسليم كما هو؟`)) return;
+   216→    }
+   217→    try {
+   218→      await api("/api/attempts", {
+   219→        method: "POST",
+   220→        body: JSON.stringify({ action: "submit", attemptId, answers: quizAnswers, auto }),
+   221→      });
+   222→    } catch { /* silent */ }
+   223→    setQuizSubmitted(true);
+   224→    showReview(attemptId);
+   225→  };
+   226→
+   227→  // Save progress
+   228→  const saveProgress = async () => {
+   229→    if (!attemptId || quizSubmitted) return;
+   230→    try {
+   231→      const data = await api("/api/attempts", {
+   232→        method: "POST",
+   233→        body: JSON.stringify({ action: "save", attemptId, answers: quizAnswers }),
+   234→      });
+   235→      if (data.status === "saved") toast.success("تم الحفظ");
+   236→      if (data.status === "expired" || data.status === "already_submitted") { void submitQuiz(true); }
+   237→    } catch { /* silent */ }
+   238→  };
+   239→
+   240→  // Quiz start
+   241→  const startQuiz = async (quizId: string) => {
+   242→    if (!user) { setView("auth"); return; }
+   243→    const data = await api("/api/attempts", {
+   244→      method: "POST",
+   245→      body: JSON.stringify({ action: "start", quizId }),
+   246→    });
+   247→    if (data.status === "already_submitted") {
+   248→      showReview(data.attemptId);
+   249→      return;
+   250→    }
+   251→    if (data.error) { toast.error(data.error); return; }
+   252→    setQuizData({ quiz: { id: quizId, title: data.durationMin ? "" : "", description: null, durationMinutes: data.durationMin || 40 }, questions: data.questions });
+   253→    setQuizAnswers(data.answers || []);
+   254→    setAttemptId(data.attemptId);
+   255→    setQuizStartTime(data.startedAt);
+   256→    setServerTimeOffset(data.serverNow - Date.now());
+   257→    setQuizStarted(true);
+   258→    setQuizSubmitted(false);
+   259→    setReviewData(null);
+   260→    setView("quiz");
+   261→  };
+   262→
+   263→  // Admin: Save subject
+   264→  const saveSubject = async () => {
+   265→    if (!subjectName.trim()) { toast.error("اسم المادة مطلوب"); return; }
+   266→    if (editSubject) {
+   267→      await api("/api/subjects", { method: "PUT", body: JSON.stringify({ id: editSubject.id, name: subjectName, description: subjectDesc }) });
+   268→      toast.success("تم تعديل المادة");
+   269→    } else {
+   270→      await api("/api/subjects", { method: "POST", body: JSON.stringify({ name: subjectName, description: subjectDesc }) });
+   271→      toast.success("تم إضافة المادة");
+   272→    }
+   273→    setSubjectDialog(false);
+   274→    setEditSubject(null);
+   275→    setSubjectName(""); setSubjectDesc("");
+   276→    loadSubjects();
+   277→  };
+   278→
+   279→  // Admin: Delete subject
+   280→  const deleteSubject = async (id: string) => {
+   281→    if (!confirm("هل أنت متأكد من حذف هذه المادة وجميع اختباراتها؟")) return;
+   282→    const data = await api(`/api/subjects?id=${id}`, { method: "DELETE" });
+   283→    if (data.error) { toast.error(data.error); return; }
+   284→    toast.success("تم حذف المادة");
+   285→    loadSubjects();
+   286→  };
+   287→
+   288→  // Admin: Save quiz
+   289→  const saveQuiz = async () => {
+   290→    if (!quizTitle.trim() || !quizSubjectId) { toast.error("بيانات غير مكتملة"); return; }
+   291→    if (editQuiz) {
+   292→      await api("/api/quizzes", { method: "PUT", body: JSON.stringify({ id: editQuiz.id, title: quizTitle, description: quizDesc, durationMinutes: parseInt(quizDuration) || 40 }) });
+   293→      toast.success("تم تعديل الاختبار");
+   294→    } else {
+   295→      await api("/api/quizzes", { method: "POST", body: JSON.stringify({ title: quizTitle, description: quizDesc, durationMinutes: parseInt(quizDuration) || 40, subjectId: quizSubjectId }) });
+   296→      toast.success("تم إضافة الاختبار");
+   297→    }
+   298→    setQuizDialog(false);
+   299→    setEditQuiz(null);
+   300→    setQuizTitle(""); setQuizDesc(""); setQuizDuration("40");
+   301→    loadSubjects();
+   302→  };
+   303→
+   304→  // Admin: Delete quiz
+   305→  const deleteQuiz = async (id: string) => {
+   306→    if (!confirm("هل أنت متأكد من حذف هذا الاختبار؟")) return;
+   307→    await api(`/api/quizzes?id=${id}`, { method: "DELETE" });
+   308→    toast.success("تم حذف الاختبار");
+   309→    loadSubjects();
+   310→  };
+   311→
+   312→  // Admin: Import preview
+   313→  const handleImportPreview = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   314→    const file = e.target.files?.[0];
+   315→    if (!file || !importQuizId) return;
+   316→    setImportLoading(true);
+   317→    const fd = new FormData();
+   318→    fd.append("file", file);
+   319→    fd.append("quizId", importQuizId);
+   320→    fd.append("action", "preview");
+   321→    const data = await api("/api/import", { method: "POST", body: fd });
+   322→    if (data.questions) {
+   323→      setImportPreview(data.questions);
+   324→      toast.success(`تم استخراج ${data.count} سؤال`);
+   325→    } else {
+   326→      toast.error(data.error || "فشل الاستيراد");
+   327→    }
+   328→    setImportLoading(false);
+   329→  };
+   330→
+   331→  // Admin: Confirm import
+   332→  const confirmImport = async () => {
+   333→    if (!importQuizId || !importPreview.length) return;
+   334→    setImportLoading(true);
+   335→    const fd = new FormData();
+   336→    if (confirmFileRef.current?.files?.[0]) {
+   337→      fd.append("file", confirmFileRef.current.files[0]);
+   338→    }
+   339→    fd.append("quizId", importQuizId);
+   340→    fd.append("action", "confirm");
+   341→    fd.append("questions", JSON.stringify(importPreview));
+   342→    const data = await api("/api/import", { method: "POST", body: fd });
+   343→    if (data.status === "imported") {
+   344→      toast.success(`تم استيراد ${data.count} سؤال بنجاح`);
+   345→      setImportDialog(false);
+   346→      setImportPreview([]);
+   347→      loadSubjects();
+   348→    } else {
+   349→      toast.error(data.error || "فشل الاستيراد");
+   350→    }
+   351→    setImportLoading(false);
+   352→  };
+   353→
+   354→  // Navigation helper
+   355→  const goHome = () => { setView("home"); setCurrentSubject(null); setMobileMenuOpen(false); };
+   356→  const goToSubject = (subject: Subject) => {
+   357→    setCurrentSubject(subject);
+   358→    loadSubjectQuizzes(subject.id);
+   359→    setView("subject");
+   360→    setMobileMenuOpen(false);
+   361→  };
+   362→  const goToDashboard = () => {
+   363→    loadDashboard();
+   364→    setView("dashboard");
+   365→    setMobileMenuOpen(false);
+   366→  };
+   367→  const goToAdmin = () => { setView("admin"); setMobileMenuOpen(false); };
+   368→
+   369→  // Calculate total pending
+   370→  const totalPending = subjects.reduce((sum, s) => sum + s.pendingQuizzes, 0);
+   371→
+   372→  if (loading) {
+   373→    return (
+   374→      <div className="min-h-screen flex items-center justify-center">
+   375→        <div className="text-center">
+   376→          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+   377→          <p className="text-muted-foreground">جاري التحميل...</p>
+   378→        </div>
+   379→      </div>
+   380→    );
+   381→  }
+   382→
+   383→  // ==================== RENDER ====================
+   384→  return (
+   385→    <div className="min-h-screen flex flex-col bg-background">
+   386→      {/* Top Bar */}
+   387→      <header className="sticky top-0 z-50 bg-card border-b border-border shadow-sm">
+   388→        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
+   389→          <div className="flex items-center gap-3">
+   390→            <button onClick={() => { if (view !== "home") { goHome(); } else { setMobileMenuOpen(!mobileMenuOpen); } }} className="p-2 rounded-lg hover:bg-secondary transition-colors">
+   391→              {view !== "home" ? <ChevronRight className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+   392→            </button>
+   393→            <button onClick={goHome} className="font-bold text-lg hover:opacity-80 transition-opacity">
+   394→              د. رحمة <span className="text-primary">·</span> بنك الأسئلة
+   395→            </button>
+   396→          </div>
+   397→          <div className="flex items-center gap-2">
+   398→            {user ? (
+   399→              <>
+   400→                {user.role === "student" && (
+   401→                  <Button variant="ghost" size="sm" onClick={goToDashboard} className="gap-1.5 text-sm">
+   402→                    <LayoutDashboard className="w-4 h-4" />
+   403→                    <span className="hidden sm:inline">نتائجي</span>
+   404→                  </Button>
+   405→                )}
+   406→                {user.role === "admin" && (
+   407→                  <Button variant="ghost" size="sm" onClick={goToAdmin} className="gap-1.5 text-sm">
+   408→                    <Shield className="w-4 h-4" />
+   409→                    <span className="hidden sm:inline">لوحة التحكم</span>
+   410→                  </Button>
+   411→                )}
+   412→                <div className="w-px h-6 bg-border mx-1" />
+   413→                <Button variant="ghost" size="sm" onClick={logout} className="gap-1.5 text-sm text-destructive">
+   414→                  <LogOut className="w-4 h-4" />
+   415→                  <span className="hidden sm:inline">خروج</span>
+   416→                </Button>
+   417→              </>
+   418→            ) : (
+   419→              <Button size="sm" onClick={() => setView("auth")} className="gap-1.5">
+   420→                <LogIn className="w-4 h-4" />
+   421→                <span>دخول</span>
+   422→              </Button>
+   423→            )}
+   424→          </div>
+   425→        </div>
+   426→      </header>
+   427→
+   428→      {/* Mobile Menu Overlay */}
+   429→      <AnimatePresence>
+   430→        {mobileMenuOpen && view === "home" && (
+   431→          <motion.div
+   432→            initial={{ opacity: 0, y: -10 }}
+   433→            animate={{ opacity: 1, y: 0 }}
+   434→            exit={{ opacity: 0, y: -10 }}
+   435→            className="absolute top-14 right-0 left-0 z-40 bg-card border-b border-border shadow-lg p-4"
+   436→          >
+   437→            <div className="flex flex-col gap-2">
+   438→              {user?.role === "student" && (
+   439→                <Button variant="ghost" className="justify-start gap-2" onClick={goToDashboard}>
+   440→                  <LayoutDashboard className="w-4 h-4" /> نتائجي
+   441→                </Button>
+   442→              )}
+   443→              {user?.role === "admin" && (
+   444→                <Button variant="ghost" className="justify-start gap-2" onClick={goToAdmin}>
+   445→                  <Shield className="w-4 h-4" /> لوحة التحكم
+   446→                </Button>
+   447→              )}
+   448→            </div>
+   449→          </motion.div>
+   450→        )}
+   451→      </AnimatePresence>
+   452→
+   453→      {/* Main Content */}
+   454→      <main className="flex-1">
+   455→        <AnimatePresence mode="wait">
+   456→          {/* ============ HOME VIEW ============ */}
+   457→          {view === "home" && (
+   458→            <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+   459→              <div className="mb-6">
+   460→                <h1 className="text-2xl font-bold mb-1">المواد الدراسية</h1>
+   461→                <p className="text-muted-foreground text-sm">اختر مادة لعرض الاختبارات المتاحة</p>
+   462→              </div>
+   463→
+   464→              {totalPending > 0 && user?.role === "student" && (
+   465→                <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+   466→                  className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2 text-sm">
+   467→                  <AlertTriangle className="w-4 h-4 text-primary" />
+   468→                  <span>باقيلك <strong>{totalPending}</strong> اختبار لسه ما حليتهاش</span>
+   469→                </motion.div>
+   470→              )}
+   471→
+   472→              {subjects.length === 0 ? (
+   473→                <Card className="p-6 text-center">
+   474→                  <BookOpen className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+   475→                  <p className="text-muted-foreground">لا توجد مواد بعد. يمكن إضافتها من لوحة التحكم.</p>
+   476→                </Card>
+   477→              ) : (
+   478→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   479→                  {subjects.map((subject, i) => (
+   480→                    <motion.button key={subject.id}
+   481→                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+   482→                      onClick={() => goToSubject(subject)}
+   483→                      className="bg-card border border-border rounded-xl p-5 text-right hover:border-primary hover:shadow-md transition-all group"
+   484→                    >
+   485→                      <div className="flex items-start justify-between mb-2">
+   486→                        <FolderOpen className="w-5 h-5 text-primary group-hover:scale-110 transition-transform" />
+   487→                        <h3 className="font-semibold text-base">{subject.name}</h3>
+   488→                      </div>
+   489→                      {subject.description && (
+   490→                        <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{subject.description}</p>
+   491→                      )}
+   492→                      <div className="flex gap-4 text-sm">
+   493→                        <div className="font-mono text-primary font-semibold">{subject.quizCount}<span className="block text-xs text-muted-foreground font-sans font-normal">اختبار</span></div>
+   494→                        {user?.role === "student" && subject.pendingQuizzes > 0 && (
+   495→                          <div className="font-mono text-destructive font-semibold">{subject.pendingQuizzes}<span className="block text-xs text-muted-foreground font-sans font-normal">متبقي</span></div>
+   496→                        )}
+   497→                      </div>
+   498→                    </motion.button>
+   499→                  ))}
+   500→                </div>
+   501→              )}
+   502→            </motion.div>
+   503→          )}
+   504→
+   505→          {/* ============ SUBJECT VIEW ============ */}
+   506→          {view === "subject" && currentSubject && (
+   507→            <motion.div key="subject" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+   508→              <div className="mb-6">
+   509→                <h1 className="text-2xl font-bold mb-1">{currentSubject.name}</h1>
+   510→                {currentSubject.description && <p className="text-muted-foreground text-sm">{currentSubject.description}</p>}
+   511→              </div>
+   512→
+   513→              {quizzes.length === 0 ? (
+   514→                <Card className="p-6 text-center">
+   515→                  <HelpCircle className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+   516→                  <p className="text-muted-foreground">لا توجد اختبارات في هذه المادة بعد.</p>
+   517→                </Card>
+   518→              ) : (
+   519→                <div className="space-y-3">
+   520→                  {quizzes.map((quiz, i) => (
+   521→                    <motion.div key={quiz.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
+   522→                      className="bg-card border border-border rounded-xl p-4 sm:p-5"
+   523→                    >
+   524→                      <div className="flex items-start justify-between gap-3">
+   525→                        <div className="flex-1">
+   526→                          <h3 className="font-semibold mb-1">{quiz.title}</h3>
+   527→                          {quiz.description && <p className="text-sm text-muted-foreground mb-2">{quiz.description}</p>}
+   528→                          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+   529→                            <span className="flex items-center gap-1"><HelpCircle className="w-3.5 h-3.5" /> {quiz.questionCount} سؤال</span>
+   530→                            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {quiz.durationMinutes} دقيقة</span>
+   531→                          </div>
+   532→                        </div>
+   533→                        {quiz.status === "submitted" ? (
+   534→                          <Badge variant="secondary" className="bg-green-100 text-green-700 shrink-0">مكتمل ✓</Badge>
+   535→                        ) : (
+   536→                          <Button onClick={() => startQuiz(quiz.id)} size="sm" className="shrink-0 gap-1.5">
+   537→                            <Play className="w-4 h-4" /> ابدأ
+   538→                          </Button>
+   539→                        )}
+   540→                      </div>
+   541→                    </motion.div>
+   542→                  ))}
+   543→                </div>
+   544→              )}
+   545→            </motion.div>
+   546→          )}
+   547→
+   548→          {/* ============ QUIZ VIEW ============ */}
+   549→          {view === "quiz" && (
+   550→            <motion.div key="quiz" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-4xl mx-auto px-4 py-6">
+   551→              {/* Quiz Header */}
+   552→              <div className="bg-card border border-border rounded-xl p-4 mb-4">
+   553→                <div className="flex items-center justify-between mb-2">
+   554→                  <h1 className="font-bold text-lg">{quizData?.quiz.title || "الاختبار"}</h1>
+   555→                  {quizStarted && !quizSubmitted && (
+   556→                    <div className={`font-mono text-xl px-3 py-1.5 rounded-lg border ${timeRemaining < 60000 ? "bg-red-50 border-red-400 text-red-600 timer-pulse" : "bg-secondary border-primary/30 text-primary"}`}>
+   557→                      {fmtTime(timeRemaining)}
+   558→                    </div>
+   559→                  )}
+   560→                </div>
+   561→                {quizData?.quiz.description && <p className="text-sm text-muted-foreground">{quizData.quiz.description}</p>}
+   562→
+   563→                {/* Landing */}
+   564→                {!quizStarted && !quizSubmitted && quizData && (
+   565→                  <div className="mt-4">
+   566→                    <div className="flex gap-6 py-3 border-y border-border mb-4">
+   567→                      <div><span className="block font-mono text-xl text-primary">{quizData.questions.length}</span><span className="text-xs text-muted-foreground">سؤال</span></div>
+   568→                      <div><span className="block font-mono text-xl text-primary">{quizData.quiz.durationMinutes}:00</span><span className="text-xs text-muted-foreground">الوقت المسموح</span></div>
+   569→                      <div><span className="block font-mono text-xl text-primary">{quizData.questions.reduce((s, q) => s + q.points, 0)}</span><span className="text-xs text-muted-foreground">درجة</span></div>
+   570→                    </div>
+   571→                    <p className="text-sm text-muted-foreground bg-secondary rounded-lg p-3 border-r-4 border-primary">
+   572→                      إجاباتك تُحفظ تلقائيًا كل بضع ثوانٍ. عند انتهاء الوقت يتم التسليم تلقائيًا. الاختبار يمكن حله مرة واحدة فقط.
+   573→                    </p>
+   574→                    <Button onClick={() => startQuiz(quizData.quiz.id)} className="mt-4 gap-2 w-full sm:w-auto">
+   575→                      <Play className="w-4 h-4" /> ابدأ الاختبار ({quizData.quiz.durationMinutes} دقيقة)
+   576→                    </Button>
+   577→                  </div>
+   578→                )}
+   579→              </div>
+   580→
+   581→              {/* Progress */}
+   582→              {quizStarted && !quizSubmitted && (
+   583→                <div className="mb-4">
+   584→                  <Progress value={quizAnswers.filter(a => a !== null).length / (quizData?.questions.length || 1) * 100} className="h-2" />
+   585→                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
+   586→                    <span>{quizAnswers.filter(a => a !== null).length} / {quizData?.questions.length} تم الإجابة</span>
+   587→                    <span></span>
+   588→                  </div>
+   589→                </div>
+   590→              )}
+   591→
+   592→              {/* Questions */}
+   593→              {quizStarted && !quizSubmitted && quizData && (
+   594→                <div className="space-y-4">
+   595→                  {quizData.questions.map((q, qi) => (
+   596→                    <motion.div key={q.id} id={`q-${qi}`} className={`bg-card border rounded-xl p-4 scroll-mt-40 transition-colors ${quizAnswers[qi] !== null ? "border-primary" : "border-border"}`}>
+   597→                      {q.imageUrl && (
+   598→                        <div className="mb-3 rounded-lg overflow-hidden bg-secondary">
+   599→                          <img src={q.imageUrl} alt="صورة السؤال" className="max-h-64 w-auto mx-auto object-contain" />
+   600→                        </div>
+   601→                      )}
+   602→                      <div className="flex items-start gap-2 mb-3">
+   603→                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-secondary text-primary text-xs font-bold shrink-0 mt-0.5">{qi + 1}</span>
+   604→                        <p className="font-medium text-sm leading-relaxed">{q.text}{q.points > 1 ? ` (${q.points} درجة)` : ""}</p>
+   605→                      </div>
+   606→                      <div className="space-y-1.5 mr-8">
+   607→                        {q.choices.map((choice, ci) => (
+   608→                          <label key={ci} className={`quiz-choice flex items-center gap-3 p-2.5 rounded-lg border ${quizAnswers[qi] === ci ? "selected border-primary bg-secondary" : "border-transparent"}`} onClick={() => {
+   609→                            const newAnswers = [...quizAnswers];
+   610→                            newAnswers[qi] = ci;
+   611→                            setQuizAnswers(newAnswers);
+   612→                          }}>
+   613→                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${quizAnswers[qi] === ci ? "border-primary" : "border-muted-foreground/30"}`}>
+   614→                              {quizAnswers[qi] === ci && <div className="w-2 h-2 rounded-full bg-primary" />}
+   615→                            </div>
+   616→                            <span className="text-sm">{choice}</span>
+   617→                          </label>
+   618→                        ))}
+   619→                      </div>
+   620→                    </motion.div>
+   621→                  ))}
+   622→                </div>
+   623→              )}
+   624→
+   625→              {/* Submit Bar */}
+   626→              {quizStarted && !quizSubmitted && (
+   627→                <div className="sticky bottom-0 bg-background/80 backdrop-blur-sm pt-4 pb-2 mt-4">
+   628→                  <div className="flex gap-2">
+   629→                    <Button variant="outline" onClick={saveProgress} className="gap-1.5"><Save className="w-4 h-4" /> حفظ</Button>
+   630→                    <Button onClick={() => submitQuiz(false)} className="flex-1 gap-1.5"><Send className="w-4 h-4" /> تسليم الاختبار</Button>
+   631→                  </div>
+   632→                </div>
+   633→              )}
+   634→
+   635→              {/* Review Results */}
+   636→              {quizSubmitted && reviewData && (
+   637→                <div>
+   638→                  <div className="bg-card border border-border rounded-xl p-6 text-center mb-6">
+   639→                    <Award className="w-12 h-12 mx-auto mb-3 text-primary" />
+   640→                    <div className="font-mono text-4xl font-bold text-primary">{reviewData.score} / {reviewData.totalPoints}</div>
+   641→                    <p className="text-muted-foreground mt-1">{reviewData.percent}% صحيح</p>
+   642→                  </div>
+   643→                  <div className="space-y-4">
+   644→                    {reviewData.questions.map((q, qi) => {
+   645→                      const isCorrect = q.picked === q.correct;
+   646→                      return (
+   647→                        <div key={q.id} className={`bg-card border rounded-xl p-4 ${isCorrect ? "border-green-500 bg-green-50" : "border-red-400 bg-red-50"}`}>
+   648→                          <div className={`text-xs font-bold uppercase tracking-wide mb-2 ${isCorrect ? "text-green-600" : "text-red-600"}`}>
+   649→                            {isCorrect ? "✓ صحيح" : (q.picked === null ? "لم يتم الإجابة" : "✗ خطأ")}
+   650→                          </div>
+   651→                          {q.imageUrl && (
+   652→                            <div className="mb-3 rounded-lg overflow-hidden bg-white">
+   653→                              <img src={q.imageUrl} alt="صورة السؤال" className="max-h-48 w-auto mx-auto object-contain" />
+   654→                            </div>
+   655→                          )}
+   656→                          <div className="flex items-start gap-2 mb-3">
+   657→                            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-white text-primary text-xs font-bold shrink-0">{qi + 1}</span>
+   658→                            <p className="font-medium text-sm">{q.text}</p>
+   659→                          </div>
+   660→                          <div className="space-y-1.5 mr-8">
+   661→                            {q.choices.map((c, ci) => (
+   662→                              <div key={c.id} className={`p-2.5 rounded-lg text-sm ${ci === q.correct ? "font-bold text-green-700 bg-green-100" : ci === q.picked && !isCorrect ? "line-through text-red-600 bg-red-100" : "text-muted-foreground"}`}>
+   663→                                {c.text}{ci === q.correct ? " ✓" : ""}{ci === q.picked && !isCorrect ? " ✗" : ""}
+   664→                              </div>
+   665→                            ))}
+   666→                          </div>
+   667→                        </div>
+   668→                      );
+   669→                    })}
+   670→                  </div>
+   671→                  <div className="text-center mt-6">
+   672→                    <Button onClick={goHome} className="gap-2">العودة للرئيسية</Button>
+   673→                  </div>
+   674→                </div>
+   675→              )}
+   676→            </motion.div>
+   677→          )}
+   678→
+   679→          {/* ============ DASHBOARD VIEW ============ */}
+   680→          {view === "dashboard" && user?.role === "student" && (
+   681→            <motion.div key="dashboard" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+   682→              <div className="mb-6">
+   683→                <h1 className="text-2xl font-bold mb-1">لوحة نتائجي</h1>
+   684→                <p className="text-muted-foreground text-sm">مرحباً {user.name || user.email}</p>
+   685→              </div>
+   686→
+   687→              {totalPending > 0 && (
+   688→                <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+   689→                  className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2 text-sm">
+   690→                  <AlertTriangle className="w-4 h-4 text-primary" />
+   691→                  <span>باقيلك <strong>{totalPending}</strong> اختبار لسه ما حليتهاش</span>
+   692→                  <Button variant="ghost" size="sm" onClick={goHome} className="mr-auto text-primary">عرض المواد</Button>
+   693→                </motion.div>
+   694→              )}
+   695→
+   696→              {attempts.length === 0 ? (
+   697→                <Card className="p-6 text-center">
+   698→                  <BarChart3 className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+   699→                  <p className="text-muted-foreground">لا توجد نتائج بعد. ابدأ بحل اختبار!</p>
+   700→                </Card>
+   701→              ) : (
+   702→                <div className="space-y-3">
+   703→                  {attempts.map((attempt, i) => (
+   704→                    <motion.div key={attempt.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
+   705→                      className="bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-3"
+   706→                    >
+   707→                      <div className="flex-1 min-w-0">
+   708→                        <h3 className="font-semibold text-sm truncate">{attempt.quiz.title}</h3>
+   709→                        <p className="text-xs text-muted-foreground mt-0.5">{attempt.quiz.subjectName} • {new Date(attempt.submittedAt).toLocaleDateString("ar-EG")}</p>
+   710→                      </div>
+   711→                      <div className="text-center shrink-0">
+   712→                        <div className={`font-mono text-xl font-bold ${attempt.percent >= 60 ? "text-green-600" : "text-destructive"}`}>{attempt.percent}%</div>
+   713→                        <div className="text-xs text-muted-foreground">{attempt.score}/{attempt.totalPoints}</div>
+   714→                      </div>
+   715→                      <Button variant="ghost" size="sm" onClick={() => showReview(attempt.id)} className="shrink-0 gap-1">
+   716→                        <Eye className="w-4 h-4" /> مراجعة
+   717→                      </Button>
+   718→                    </motion.div>
+   719→                  ))}
+   720→                </div>
+   721→              )}
+   722→            </motion.div>
+   723→          )}
+   724→
+   725→          {/* ============ AUTH VIEW ============ */}
+   726→          {view === "auth" && !user && (
+   727→            <motion.div key="auth" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="max-w-sm mx-auto px-4 py-16">
+   728→              <Card className="p-6">
+   729→                <div className="text-center mb-6">
+   730→                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
+   731→                    {authMode === "login" ? <LogIn className="w-6 h-6 text-primary" /> : <UserPlus className="w-6 h-6 text-primary" />}
+   732→                  </div>
+   733→                  <h2 className="text-xl font-bold">{authMode === "login" ? "تسجيل الدخول" : "حساب جديد"}</h2>
+   734→                </div>
+   735→
+   736→                <div className="space-y-4">
+   737→                  {authMode === "register" && (
+   738→                    <div>
+   739→                      <Label>الاسم</Label>
+   740→                      <Input placeholder="الاسم الكامل" value={authName} onChange={e => setAuthName(e.target.value)} className="mt-1" />
+   741→                    </div>
+   742→                  )}
+   743→                  <div>
+   744→                    <Label>البريد الإلكتروني</Label>
+   745→                    <Input type="email" placeholder="example@email.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="mt-1" dir="ltr" />
+   746→                  </div>
+   747→                  <div>
+   748→                    <Label>كلمة السر</Label>
+   749→                    <Input type="password" placeholder="••••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" dir="ltr" />
+   750→                  </div>
+   751→                  <Button onClick={handleAuth} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
+   752→                    {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
+   753→                    {authMode === "login" ? "تسجيل الدخول" : "إنشاء حساب"}
+   754→                  </Button>
+   755→                </div>
+   756→
+   757→                <div className="mt-4 text-center text-sm">
+   758→                  <button onClick={() => setAuthMode(authMode === "login" ? "register" : "login")} className="text-primary font-semibold hover:underline">
+   759→                    {authMode === "login" ? "ليس لديك حساب؟ سجل الآن" : "لديك حساب؟ سجل دخول"}
+   760→                  </button>
+   761→                </div>
+   762→              </Card>
+   763→            </motion.div>
+   764→          )}
+   765→
+   766→          {/* ============ ADMIN VIEW ============ */}
+   767→          {view === "admin" && user?.role === "admin" && (
+   768→            <motion.div key="admin" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+   769→              <div className="mb-6">
+   770→                <h1 className="text-2xl font-bold mb-1">لوحة التحكم</h1>
+   771→                <p className="text-muted-foreground text-sm">مرحباً {user.name || user.email} — إدارة المواد والاختبارات</p>
+   772→              </div>
+   773→
+   774→              <Tabs value={adminTab} onValueChange={setAdminTab}>
+   775→                <TabsList className="w-full mb-6">
+   776→                  <TabsTrigger value="subjects" className="flex-1 gap-1.5"><FolderOpen className="w-4 h-4" /> المواد</TabsTrigger>
+   777→                  <TabsTrigger value="quizzes" className="flex-1 gap-1.5"><FileText className="w-4 h-4" /> الاختبارات</TabsTrigger>
+   778→                  <TabsTrigger value="import" className="flex-1 gap-1.5"><Upload className="w-4 h-4" /> استيراد</TabsTrigger>
+   779→                </TabsList>
+   780→
+   781→                {/* Subjects Tab */}
+   782→                <TabsContent value="subjects">
+   783→                  <div className="flex items-center justify-between mb-4">
+   784→                    <h2 className="font-semibold">المواد ({subjects.length})</h2>
+   785→                    <Button size="sm" onClick={() => { setEditSubject(null); setSubjectName(""); setSubjectDesc(""); setSubjectDialog(true); }} className="gap-1.5">
+   786→                      <Plus className="w-4 h-4" /> إضافة مادة
+   787→                    </Button>
+   788→                  </div>
+   789→                  {subjects.length === 0 ? (
+   790→                    <Card className="p-6 text-center text-muted-foreground">لا توجد مواد بعد</Card>
+   791→                  ) : (
+   792→                    <div className="space-y-2">
+   793→                      {subjects.map((s) => (
+   794→                        <div key={s.id} className="bg-card border border-border rounded-lg p-3 flex items-center justify-between">
+   795→                          <div>
+   796→                            <h3 className="font-semibold text-sm">{s.name}</h3>
+   797→                            <p className="text-xs text-muted-foreground">{s.description || "بدون وصف"} • {s.quizCount} اختبار</p>
+   798→                          </div>
+   799→                          <div className="flex gap-1">
+   800→                            <Button variant="ghost" size="sm" onClick={() => { setEditSubject(s); setSubjectName(s.name); setSubjectDesc(s.description || ""); setSubjectDialog(true); }}><Edit3 className="w-4 h-4" /></Button>
+   801→                            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteSubject(s.id)}><Trash2 className="w-4 h-4" /></Button>
+   802→                          </div>
+   803→                        </div>
+   804→                      ))}
+   805→                    </div>
+   806→                  )}
+   807→                </TabsContent>
+   808→
+   809→                {/* Quizzes Tab */}
+   810→                <TabsContent value="quizzes">
+   811→                  <div className="flex items-center justify-between mb-4">
+   812→                    <h2 className="font-semibold">الاختبارات</h2>
+   813→                    <Button size="sm" onClick={() => { setEditQuiz(null); setQuizTitle(""); setQuizDesc(""); setQuizDuration("40"); setQuizSubjectId(subjects[0]?.id || ""); setQuizDialog(true); }} className="gap-1.5">
+   814→                      <Plus className="w-4 h-4" /> إضافة اختبار
+   815→                    </Button>
+   816→                  </div>
+   817→                  {subjects.length === 0 ? (
+   818→                    <Card className="p-6 text-center text-muted-foreground">أضف مواد أولاً ثم أنشئ اختبارات</Card>
+   819→                  ) : (
+   820→                    <div className="space-y-2">
+   821→                      {subjects.map((s) => (
+   822→                        s.quizzes.length > 0 && (
+   823→                          <div key={s.id} className="mb-4">
+   824→                            <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-1.5"><FolderOpen className="w-4 h-4" /> {s.name}</h3>
+   825→                            {s.quizzes.map((q) => (
+   826→                              <div key={q.id} className="bg-card border border-border rounded-lg p-3 mb-2 flex items-center justify-between">
+   827→                                <div>
+   828→                                  <h4 className="font-semibold text-sm">{q.title}</h4>
+   829→                                  <p className="text-xs text-muted-foreground">{q.questionCount} سؤال • {q.durationMinutes} دقيقة • {q.attemptCount} محاولة</p>
+   830→                                </div>
+   831→                                <div className="flex gap-1">
+   832→                                  <Button variant="ghost" size="sm" onClick={() => { setEditQuiz(q); setQuizTitle(q.title); setQuizDesc(q.description || ""); setQuizDuration(String(q.durationMinutes)); setQuizSubjectId(s.id); setQuizDialog(true); }}><Edit3 className="w-4 h-4" /></Button>
+   833→                                  <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteQuiz(q.id)}><Trash2 className="w-4 h-4" /></Button>
+   834→                                </div>
+   835→                              </div>
+   836→                            ))}
+   837→                          </div>
+   838→                        )
+   839→                      ))}
+   840→                    </div>
+   841→                  )}
+   842→                </TabsContent>
+   843→
+   844→                {/* Import Tab */}
+   845→                <TabsContent value="import">
+   846→                  <div className="mb-4">
+   847→                    <h2 className="font-semibold mb-1">استيراد أسئلة</h2>
+   848→                    <p className="text-sm text-muted-foreground">ارفع ملف وورد (docx) أو إكسل (xlsx) لاستيراد الأسئلة تلقائيًا</p>
+   849→                  </div>
+   850→                  <Card className="p-5">
+   851→                    <div className="space-y-4">
+   852→                      <div>
+   853→                        <Label>اختر الاختبار</Label>
+   854→                        <select value={importQuizId} onChange={e => setImportQuizId(e.target.value)} className="w-full mt-1 p-2.5 border border-border rounded-lg text-sm bg-background">
+   855→                          <option value="">-- اختر اختبار --</option>
+   856→                          {subjects.flatMap(s => s.quizzes.map(q => ({ ...q, subjectName: s.name }))).map(q => (
+   857→                            <option key={q.id} value={q.id}>{q.subjectName} — {q.title}</option>
+   858→                          ))}
+   859→                        </select>
+   860→                      </div>
+   861→                      <div>
+   862→                        <Label>رفع ملف</Label>
+   863→                        <div className="mt-1 border-2 border-dashed border-border rounded-lg p-6 text-center">
+   864→                          <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+   865→                          <p className="text-sm text-muted-foreground mb-2">اسحب الملف هنا أو انقر للاختيار</p>
+   866→                          <input ref={importFileRef} type="file" accept=".docx,.xlsx,.xls" onChange={handleImportPreview} className="text-sm" />
+   867→                        </div>
+   868→                      </div>
+   869→
+   870→                      {importLoading && <div className="text-center text-sm text-muted-foreground">جاري التحليل...</div>}
+   871→
+   872→                      {importPreview.length > 0 && (
+   873→                        <div>
+   874→                          <div className="flex items-center justify-between mb-2">
+   875→                            <h3 className="font-semibold text-sm">معاينة ({importPreview.length} سؤال)</h3>
+   876→                          </div>
+   877→                          <div className="max-h-96 overflow-y-auto custom-scroll space-y-2 border border-border rounded-lg p-3">
+   878→                            {importPreview.map((q, i) => (
+   879→                              <div key={i} className="bg-secondary/50 rounded-lg p-3">
+   880→                                <div className="flex items-start gap-2 mb-2">
+   881→                                  <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold shrink-0">{i + 1}</span>
+   882→                                  <p className="text-sm font-medium">{q.text}</p>
+   883→                                </div>
+   884→                                {q.imageUrl && <img src={q.imageUrl} alt="" className="max-h-32 rounded-lg mb-2" />}
+   885→                                <div className="mr-7 space-y-1">
+   886→                                  {q.choices.map((c, ci) => (
+   887→                                    <div key={ci} className={`text-xs p-1.5 rounded ${c.isCorrect ? "bg-green-100 text-green-700 font-bold" : "text-muted-foreground"}`}>
+   888→                                      {String.fromCharCode(65 + ci)}) {c.text} {c.isCorrect ? "✓" : ""}
+   889→                                    </div>
+   890→                                  ))}
+   891→                                </div>
+   892→                              </div>
+   893→                            ))}
+   894→                          </div>
+   895→                          <div className="flex gap-2 mt-4">
+   896→                            <Button onClick={confirmImport} disabled={importLoading} className="flex-1 gap-1.5">
+   897→                              {importLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+   898→                              تأكيد الاستيراد
+   899→                            </Button>
+   900→                            <Button variant="outline" onClick={() => setImportPreview([])}>إلغاء</Button>
+   901→                          </div>
+   902→                        </div>
+   903→                      )}
+   904→                    </div>
+   905→                  </Card>
+   906→                </TabsContent>
+   907→              </Tabs>
+   908→            </motion.div>
+   909→          )}
+   910→        </AnimatePresence>
+   911→      </main>
+   912→
+   913→      {/* Subject Dialog */}
+   914→      <Dialog open={subjectDialog} onOpenChange={setSubjectDialog}>
+   915→        <DialogContent>
+   916→          <DialogHeader><DialogTitle>{editSubject ? "تعديل المادة" : "إضافة مادة جديدة"}</DialogTitle></DialogHeader>
+   917→          <div className="space-y-3">
+   918→            <div><Label>اسم المادة</Label><Input value={subjectName} onChange={e => setSubjectName(e.target.value)} placeholder="مثال: التشريح" className="mt-1" /></div>
+   919→            <div><Label>الوصف (اختياري)</Label><Input value={subjectDesc} onChange={e => setSubjectDesc(e.target.value)} placeholder="وصف مختصر للمادة" className="mt-1" /></div>
+   920→          </div>
+   921→          <DialogFooter>
+   922→            <Button variant="outline" onClick={() => setSubjectDialog(false)}>إلغاء</Button>
+   923→            <Button onClick={saveSubject} disabled={!subjectName.trim()}>حفظ</Button>
+   924→          </DialogFooter>
+   925→        </DialogContent>
+   926→      </Dialog>
+   927→
+   928→      {/* Quiz Dialog */}
+   929→      <Dialog open={quizDialog} onOpenChange={setQuizDialog}>
+   930→        <DialogContent>
+   931→          <DialogHeader><DialogTitle>{editQuiz ? "تعديل الاختبار" : "إضافة اختبار جديد"}</DialogTitle></DialogHeader>
+   932→          <div className="space-y-3">
+   933→            <div>
+   934→              <Label>المادة</Label>
+   935→              <select value={quizSubjectId} onChange={e => setQuizSubjectId(e.target.value)} className="w-full mt-1 p-2.5 border border-border rounded-lg text-sm bg-background">
+   936→                {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+   937→              </select>
+   938→            </div>
+   939→            <div><Label>عنوان الاختبار</Label><Input value={quizTitle} onChange={e => setQuizTitle(e.target.value)} placeholder="مثال: اختبار الوحدة الأولى" className="mt-1" /></div>
+   940→            <div><Label>الوصف (اختياري)</Label><Input value={quizDesc} onChange={e => setQuizDesc(e.target.value)} placeholder="وصف مختصر" className="mt-1" /></div>
+   941→            <div><Label>مدة الاختبار (دقيقة)</Label><Input type="number" value={quizDuration} onChange={e => setQuizDuration(e.target.value)} className="mt-1" dir="ltr" /></div>
+   942→          </div>
+   943→          <DialogFooter>
+   944→            <Button variant="outline" onClick={() => setQuizDialog(false)}>إلغاء</Button>
+   945→            <Button onClick={saveQuiz} disabled={!quizTitle.trim() || !quizSubjectId}>حفظ</Button>
+   946→          </DialogFooter>
+   947→        </DialogContent>
+   948→      </Dialog>
+   949→
+   950→      {/* Footer */}
+   951→      <footer className="mt-auto border-t border-border bg-card py-4">
+   952→        <div className="max-w-4xl mx-auto px-4 text-center text-xs text-muted-foreground">
+   953→          د. رحمة — بنك الأسئلة © {new Date().getFullYear()}
+   954→        </div>
+   955→      </footer>
+   956→    </div>
+   957→  );
+   958→}
+   959→
