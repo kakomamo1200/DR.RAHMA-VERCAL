@@ -72,6 +72,7 @@ export default function QuizBank() {
 
   // Auth form state
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authRole, setAuthRole] = useState<"student" | "teacher">("student");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authName, setAuthName] = useState("");
@@ -178,8 +179,9 @@ export default function QuizBank() {
       localStorage.setItem("quiz_token", data.token);
       setUser(data.user);
       setView("home");
-      toast.success(data.user.role === "admin" ? "Logged in as Admin" : "Logged in successfully");
+      toast.success(data.user.role === "admin" ? "Logged in as Teacher" : "Logged in successfully");
       setAuthEmail(""); setAuthPassword(""); setAuthName("");
+      if (data.user.role === "admin") { setView("admin"); }
     } else {
       toast.error(data.error || "Something went wrong");
     }
@@ -422,10 +424,16 @@ export default function QuizBank() {
                 </Button>
               </>
             ) : (
-              <Button size="sm" onClick={() => setView("auth")} className="gap-1.5">
-                <LogIn className="w-4 h-4" />
-                <span>Login</span>
-              </Button>
+              <>
+                <Button variant="ghost" size="sm" onClick={() => { setAuthRole("teacher"); setAuthMode("login"); setView("auth"); }} className="gap-1.5 text-primary">
+                  <Shield className="w-4 h-4" />
+                  <span className="hidden sm:inline">Teacher</span>
+                </Button>
+                <Button size="sm" onClick={() => { setAuthRole("student"); setAuthMode("login"); setView("auth"); }} className="gap-1.5">
+                  <LogIn className="w-4 h-4" />
+                  <span>Login</span>
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -466,7 +474,34 @@ export default function QuizBank() {
         <AnimatePresence mode="wait">
 
           {/* ========== HOME ========== */}
-          {view === "home" && (
+          {view === "home" && !user && (
+            <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-lg mx-auto px-4 py-16">
+              <div className="text-center mb-10">
+                <h1 className="text-3xl font-bold mb-2">Dr. Rahma · Quiz Bank</h1>
+                <p className="text-muted-foreground">Choose how you want to continue</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button onClick={() => { setAuthRole("student"); setAuthMode("login"); setView("auth"); }}
+                  className="bg-card border-2 border-border rounded-xl p-6 text-center hover:border-primary hover:shadow-lg transition-all group">
+                  <div className="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
+                    <Users className="w-7 h-7 text-blue-600" />
+                  </div>
+                  <h2 className="font-bold text-lg mb-1">Student</h2>
+                  <p className="text-sm text-muted-foreground">Take quizzes and view your results</p>
+                </button>
+                <button onClick={() => { setAuthRole("teacher"); setAuthMode("login"); setView("auth"); }}
+                  className="bg-card border-2 border-border rounded-xl p-6 text-center hover:border-primary hover:shadow-lg transition-all group">
+                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
+                    <Shield className="w-7 h-7 text-primary" />
+                  </div>
+                  <h2 className="font-bold text-lg mb-1">Teacher</h2>
+                  <p className="text-sm text-muted-foreground">Manage subjects, quizzes & questions</p>
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {view === "home" && user && (
             <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
               <div className="mb-6">
                 <h1 className="text-2xl font-bold mb-1">Subjects</h1>
@@ -739,14 +774,31 @@ export default function QuizBank() {
             <motion.div key="auth" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="max-w-sm mx-auto px-4 py-16">
               <Card className="p-6">
                 <div className="text-center mb-6">
-                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
-                    {authMode === "login" ? <LogIn className="w-6 h-6 text-primary" /> : <UserPlus className="w-6 h-6 text-primary" />}
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 ${authRole === "teacher" ? "bg-primary/10" : "bg-blue-50"}`}>
+                    {authRole === "teacher" ? <Shield className="w-6 h-6 text-primary" /> : <LogIn className="w-6 h-6 text-blue-600" />}
                   </div>
-                  <h2 className="text-xl font-bold">{authMode === "login" ? "Sign In" : "Create Account"}</h2>
+                  <h2 className="text-xl font-bold">
+                    {authRole === "teacher" ? "Teacher Sign In" : authMode === "login" ? "Student Sign In" : "Student Sign Up"}
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {authRole === "teacher" ? "Access the teacher management panel" : authMode === "login" ? "Login to take quizzes" : "Create a new student account"}
+                  </p>
                 </div>
 
+                {/* Role switcher */}
+                {authMode === "login" && (
+                  <div className="flex rounded-lg border border-border p-0.5 mb-5">
+                    <button onClick={() => setAuthRole("student")} className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${authRole === "student" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                      Student
+                    </button>
+                    <button onClick={() => setAuthRole("teacher")} className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${authRole === "teacher" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                      Teacher
+                    </button>
+                  </div>
+                )}
+
                 <div className="space-y-4">
-                  {authMode === "register" && (
+                  {authRole === "student" && authMode === "register" && (
                     <div>
                       <Label>Full Name</Label>
                       <Input placeholder="John Doe" value={authName} onChange={e => setAuthName(e.target.value)} className="mt-1" />
@@ -758,19 +810,21 @@ export default function QuizBank() {
                   </div>
                   <div>
                     <Label>Password</Label>
-                    <Input type="password" placeholder="••••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" />
+                    <Input type="password" placeholder="•••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" />
                   </div>
                   <Button onClick={handleAuth} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
                     {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
-                    {authMode === "login" ? "Sign In" : "Create Account"}
+                    {authRole === "teacher" ? "Sign In as Teacher" : authMode === "login" ? "Sign In" : "Create Account"}
                   </Button>
                 </div>
 
-                <div className="mt-4 text-center text-sm">
-                  <button onClick={() => setAuthMode(authMode === "login" ? "register" : "login")} className="text-primary font-semibold hover:underline">
-                    {authMode === "login" ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
-                  </button>
-                </div>
+                {authRole === "student" && (
+                  <div className="mt-4 text-center text-sm">
+                    <button onClick={() => setAuthMode(authMode === "login" ? "register" : "login")} className="text-primary font-semibold hover:underline">
+                      {authMode === "login" ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+                    </button>
+                  </div>
+                )}
               </Card>
             </motion.div>
           )}
