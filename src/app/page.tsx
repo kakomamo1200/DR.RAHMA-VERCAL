@@ -351,8 +351,8 @@ export default function QuizBank() {
     if (!importQuizId || !importPreview.length) return;
     setImportLoading(true);
     const fd = new FormData();
-    if (confirmFileRef.current?.files?.[0]) {
-      fd.append("file", confirmFileRef.current.files[0]);
+    if (importFileRef.current?.files?.[0]) {
+      fd.append("file", importFileRef.current.files[0]);
     }
     fd.append("quizId", importQuizId);
     fd.append("action", "confirm");
