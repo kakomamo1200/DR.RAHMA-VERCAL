@@ -140,34 +140,97 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
   return { questions };
 }
 
+async function extractExcelDrawingRowMap(zip: JSZip): Promise<Record<number, string>> {
+  const rowToImageMap: Record<number, string> = {};
+
+  try {
+    const drawingFiles = Object.keys(zip.files).filter(f => /^xl\/drawings\/drawing\d+\.xml$/i.test(f));
+
+    for (const drawingPath of drawingFiles) {
+      const relsPath = drawingPath.replace(/xl\/drawings\/(drawing\d+\.xml)/i, 'xl/drawings/_rels/$1.rels');
+      const relsFile = zip.files[relsPath];
+      const drawingFile = zip.files[drawingPath];
+
+      if (!relsFile || !drawingFile) continue;
+
+      const relsXml = await relsFile.async('string');
+      const drawingXml = await drawingFile.async('string');
+
+      // Map rId -> media file path (e.g. rId1 -> xl/media/image1.png)
+      const rIdToMediaPath: Record<string, string> = {};
+      const relRegex = /<Relationship[^>]+Id="([^"]+)"[^>]+Target="([^"]+)"/g;
+      let relMatch;
+      while ((relMatch = relRegex.exec(relsXml)) !== null) {
+        const id = relMatch[1];
+        let target = relMatch[2];
+        if (target.startsWith('../')) target = 'xl/' + target.slice(3);
+        else if (!target.startsWith('xl/')) target = 'xl/media/' + target.split('/').pop();
+        rIdToMediaPath[id] = target;
+      }
+
+      // Find all anchors and extract row index and rId
+      const anchors = drawingXml.split(/<xdr:(?:twoCellAnchor|oneCellAnchor)/i);
+
+      for (const anchor of anchors) {
+        const rowMatch = anchor.match(/<xdr:from>[^]*?<xdr:row>(\d+)<\/xdr:row>/i) || anchor.match(/<xdr:row>(\d+)<\/xdr:row>/i);
+        const embedMatch = anchor.match(/r:embed="([^"]+)"/i);
+
+        if (rowMatch && embedMatch) {
+          const excelRowIndex = parseInt(rowMatch[1], 10);
+          const rId = embedMatch[1];
+          const mediaPath = rIdToMediaPath[rId];
+
+          if (mediaPath && zip.files[mediaPath]) {
+            const mediaBuffer = await zip.files[mediaPath].async('nodebuffer');
+            const ext = mediaPath.split('.').pop() || 'png';
+            const savedUrl = await saveImageToDisk(mediaBuffer, ext);
+            rowToImageMap[excelRowIndex] = savedUrl;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Drawing row map extraction warning:', err);
+  }
+
+  return rowToImageMap;
+}
+
 async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuestion[] }> {
   const workbook = XLSX.read(buffer, { type: 'buffer' });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
   const questions: ParsedQuestion[] = [];
 
-  // Extract embedded images from Excel ZIP archive (xl/media/...)
-  const extractedImages: string[] = [];
+  let rowToImageMap: Record<number, string> = {};
+  const fallbackImages: string[] = [];
+
   try {
     const zip = await JSZip.loadAsync(buffer);
-    const mediaFiles = Object.keys(zip.files).filter(filename => /^xl\/media\//i.test(filename));
-    mediaFiles.sort(); // keep deterministic image order
-    for (const mediaPath of mediaFiles) {
-      const zipFile = zip.files[mediaPath];
-      if (zipFile && !zipFile.dir) {
-        const fileData = await zipFile.async('nodebuffer');
-        const ext = mediaPath.split('.').pop() || 'png';
-        const savedUrl = await saveImageToDisk(fileData, ext);
-        extractedImages.push(savedUrl);
+    rowToImageMap = await extractExcelDrawingRowMap(zip);
+
+    // Collect fallback images only if drawing XML mapping wasn't found
+    if (Object.keys(rowToImageMap).length === 0) {
+      const mediaFiles = Object.keys(zip.files).filter(filename => /^xl\/media\//i.test(filename));
+      mediaFiles.sort();
+      for (const mediaPath of mediaFiles) {
+        const zipFile = zip.files[mediaPath];
+        if (zipFile && !zipFile.dir) {
+          const fileData = await zipFile.async('nodebuffer');
+          const ext = mediaPath.split('.').pop() || 'png';
+          const savedUrl = await saveImageToDisk(fileData, ext);
+          fallbackImages.push(savedUrl);
+        }
       }
     }
   } catch (zipError) {
     console.warn('Excel zip media extraction notice:', zipError);
   }
 
-  let extractedImageIndex = 0;
+  let fallbackImageIndex = 0;
 
-  for (const row of rows) {
+  for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+    const row = rows[rIdx];
     const text = String(row['question'] || row['text'] || '').trim();
     if (!text) continue;
 
@@ -200,9 +263,17 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
       }
     }
 
-    // Fall back to extracted Excel embedded shape/picture if available
-    if (!imageUrl && extractedImageIndex < extractedImages.length) {
-      imageUrl = extractedImages[extractedImageIndex++];
+    // Match exact Excel row index from drawing XML
+    if (!imageUrl) {
+      const targetImage = rowToImageMap[rIdx + 1] || rowToImageMap[rIdx + 2] || rowToImageMap[rIdx];
+      if (targetImage) {
+        imageUrl = targetImage;
+      }
+    }
+
+    // Fall back to sequential image list only if no drawing row map exists at all
+    if (!imageUrl && Object.keys(rowToImageMap).length === 0 && fallbackImageIndex < fallbackImages.length) {
+      imageUrl = fallbackImages[fallbackImageIndex++];
     }
 
     const choices: { text: string; isCorrect: boolean }[] = [];
