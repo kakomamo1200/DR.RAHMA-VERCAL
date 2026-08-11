@@ -236,6 +236,7 @@ export default function QuizBank() {
         method: "POST",
         body: JSON.stringify({ action: "submit", attemptId, answers: quizAnswers, auto }),
       });
+      loadSubjects();
     } catch { /* silent */ }
     setQuizSubmitted(true);
     showReview(attemptId);
@@ -385,7 +386,7 @@ export default function QuizBank() {
   };
 
   // Navigation helpers
-  const goHome = () => { setView("home"); setCurrentSubject(null); setMobileMenuOpen(false); };
+  const goHome = () => { setView("home"); setCurrentSubject(null); setMobileMenuOpen(false); loadSubjects(); };
   const goToSubject = (subject: Subject) => {
     setCurrentSubject(subject);
     loadSubjectQuizzes(subject.id);

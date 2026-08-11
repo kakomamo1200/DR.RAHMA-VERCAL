@@ -9,7 +9,16 @@ export async function GET(request: NextRequest) {
     const where = subjectId ? { subjectId } : {};
     const quizzes = await db.quiz.findMany({ where, orderBy: { order: 'asc' }, include: { subject: { select: { name: true } }, _count: { select: { questions: true, attempts: true } } } });
     let attemptStatuses: Record<string, string> = {};
-    if (user) { const attempts = await db.attempt.findMany({ where: { userId: user.id }, select: { quizId: true, submittedAt: true } }); attempts.forEach(a => { attemptStatuses[a.quizId] = a.submittedAt ? 'submitted' : 'in_progress'; }); }
+    if (user) {
+      const attempts = await db.attempt.findMany({ where: { userId: user.id }, select: { quizId: true, submittedAt: true } });
+      attempts.forEach(a => {
+        if (a.submittedAt) {
+          attemptStatuses[a.quizId] = 'submitted';
+        } else if (attemptStatuses[a.quizId] !== 'submitted') {
+          attemptStatuses[a.quizId] = 'in_progress';
+        }
+      });
+    }
     return NextResponse.json({ quizzes: quizzes.map(q => ({ id: q.id, title: q.title, description: q.description, durationMinutes: q.durationMinutes, questionCount: q._count.questions, attemptCount: q._count.attempts, subjectName: q.subject.name, order: q.order, status: attemptStatuses[q.id] || null })) });
   } catch (error) { console.error('Quizzes GET error:', error); return NextResponse.json({ error: 'Something went wrong' }, { status: 500 }); }
 }

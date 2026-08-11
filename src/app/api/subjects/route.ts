@@ -17,9 +17,27 @@ export async function GET(request: NextRequest) {
     if (user) {
       const attempts = await db.attempt.findMany({ where: { userId: user.id, submittedAt: { not: null } }, select: { quizId: true } });
       const completedQuizIds = new Set(attempts.map(a => a.quizId));
-      subjects.forEach(s => { const total = s.quizzes.length; const completed = s.quizzes.filter(q => completedQuizIds.has(q.id)).length; pendingCounts[s.id] = total - completed; });
+      subjects.forEach(s => {
+        const playableQuizzes = s.quizzes.filter(q => q._count.questions > 0);
+        const total = playableQuizzes.length;
+        const completed = playableQuizzes.filter(q => completedQuizIds.has(q.id)).length;
+        pendingCounts[s.id] = total - completed;
+      });
     }
-    return NextResponse.json({ subjects: subjects.map(s => ({ id: s.id, name: s.name, description: s.description, order: s.order, quizCount: s._count.quizzes, quizzes: s.quizzes.map(q => ({ id: q.id, title: q.title, description: q.description, durationMinutes: q.durationMinutes, questionCount: q._count.questions, order: q.order })), pendingQuizzes: pendingCounts[s.id] || 0 })) });
+    return NextResponse.json({
+      subjects: subjects.map(s => {
+        const playableQuizzes = s.quizzes.filter(q => q._count.questions > 0);
+        return {
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          order: s.order,
+          quizCount: playableQuizzes.length,
+          quizzes: s.quizzes.map(q => ({ id: q.id, title: q.title, description: q.description, durationMinutes: q.durationMinutes, questionCount: q._count.questions, order: q.order })),
+          pendingQuizzes: pendingCounts[s.id] || 0
+        };
+      })
+    });
   } catch (error) {
     console.error('Subjects GET error:', error); return NextResponse.json({ error: 'Something went wrong' }, { status: 500 }); }
 }
