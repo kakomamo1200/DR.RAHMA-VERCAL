@@ -210,31 +210,42 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
     const zip = await JSZip.loadAsync(buffer);
     rowToImageMap = await extractExcelDrawingRowMap(zip);
 
-    // Collect fallback images only if drawing XML mapping wasn't found
-    if (Object.keys(rowToImageMap).length === 0) {
-      const mediaFiles = Object.keys(zip.files).filter(filename => /^xl\/media\//i.test(filename));
-      mediaFiles.sort();
-      for (const mediaPath of mediaFiles) {
-        const zipFile = zip.files[mediaPath];
-        if (zipFile && !zipFile.dir) {
-          const fileData = await zipFile.async('nodebuffer');
-          const ext = mediaPath.split('.').pop() || 'png';
-          const savedUrl = await saveImageToDisk(fileData, ext);
-          fallbackImages.push(savedUrl);
-        }
+    // Extract all media files in order
+    const mediaFiles = Object.keys(zip.files).filter(filename => /xl\/media\//i.test(filename) || /media\/image/i.test(filename));
+    mediaFiles.sort((a, b) => {
+      const numA = parseInt(a.match(/\d+/)?.[0] || '0', 10);
+      const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10);
+      return numA - numB;
+    });
+
+    for (const mediaPath of mediaFiles) {
+      const zipFile = zip.files[mediaPath];
+      if (zipFile && !zipFile.dir) {
+        const fileData = await zipFile.async('nodebuffer');
+        const ext = mediaPath.split('.').pop() || 'png';
+        const savedUrl = await saveImageToDisk(fileData, ext);
+        fallbackImages.push(savedUrl);
       }
     }
   } catch (zipError) {
     console.warn('Excel zip media extraction notice:', zipError);
   }
 
-  let fallbackImageIndex = 0;
+  // Count valid questions with text
+  const validRows = rows.filter(r => String(r['question'] || r['text'] || '').trim().length > 0);
+  const totalQuestions = validRows.length;
+  const totalImages = fallbackImages.length;
+  // If questions > images (e.g. 50 questions, 20 images starting at Q31), offset = 50 - 20 = 30
+  const imageOffset = (totalQuestions > totalImages && totalImages > 0) ? (totalQuestions - totalImages) : 0;
+
+  let validQuestionIndex = 0;
 
   for (let rIdx = 0; rIdx < rows.length; rIdx++) {
     const row = rows[rIdx];
     const text = String(row['question'] || row['text'] || '').trim();
     if (!text) continue;
 
+    const currentQIdx = validQuestionIndex++;
     const passage = String(row['passage'] || row['Passage'] || row['قطعة'] || '').trim() || null;
     const typeStr = String(row['type'] || row['Type'] || row['نوع'] || '').trim().toLowerCase();
     const type: 'mcq' | 'true_false' = (typeStr.includes('true') || typeStr.includes('tf') || typeStr.includes('صح')) ? 'true_false' : 'mcq';
@@ -244,6 +255,7 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
       row['image'] || row['imageUrl'] || row['imageEmbedded'] || row['صورة'] || row['الصورة'] || ''
     ).trim();
 
+    // 1. Explicit text column image (URL, Data URI, Base64)
     if (rawImg) {
       if (rawImg.startsWith('http://') || rawImg.startsWith('https://') || rawImg.startsWith('/uploads/') || rawImg.startsWith('data:image')) {
         if (rawImg.startsWith('data:image')) {
@@ -264,7 +276,7 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
       }
     }
 
-    // Match exact Excel row index from drawing XML (Row 0 is header, so row rIdx+1 is Excel data row index)
+    // 2. Drawing XML precise row anchor mapping
     if (!imageUrl) {
       const targetImage = rowToImageMap[rIdx + 1] || rowToImageMap[rIdx + 2] || rowToImageMap[rIdx];
       if (targetImage) {
@@ -272,9 +284,15 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
       }
     }
 
-    // Fall back to sequential image list ONLY if the image column has an indicator (non-empty rawImg)
-    if (!imageUrl && rawImg && fallbackImageIndex < fallbackImages.length) {
-      imageUrl = fallbackImages[fallbackImageIndex++];
+    // 3. Smart Tail Offset Alignment (if images start at Question 31, e.g. 50 questions & 20 images)
+    if (!imageUrl && totalImages > 0) {
+      if (imageOffset > 0) {
+        if (currentQIdx >= imageOffset && (currentQIdx - imageOffset) < totalImages) {
+          imageUrl = fallbackImages[currentQIdx - imageOffset];
+        }
+      } else if (currentQIdx < totalImages) {
+        imageUrl = fallbackImages[currentQIdx];
+      }
     }
 
     const choices: { text: string; isCorrect: boolean }[] = [];
