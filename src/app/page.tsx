@@ -439,18 +439,14 @@ export default function QuizBank() {
   };
 
   // Download import example
-  const downloadExample = async () => {
-    try {
-      const data = await api("/api/import?action=example");
-      if (data.url) {
-        window.open(data.url, "_blank");
-        toast.success("Example file downloaded");
-      } else {
-        toast.error("Failed to generate example");
-      }
-    } catch {
-      toast.error("Failed to download example");
-    }
+  const downloadExample = () => {
+    const a = document.createElement("a");
+    a.href = "/api/import?action=example";
+    a.download = "import-example.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    toast.success("Downloading example template...");
   };
 
   // Navigation helpers

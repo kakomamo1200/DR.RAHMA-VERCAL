@@ -34,12 +34,8 @@ async function saveImageToDisk(data: Buffer, ext: string): Promise<string> {
   }
 }
 
-// Generate example Excel file and return its path
-async function generateExampleFile(): Promise<string> {
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-  await mkdir(uploadDir, { recursive: true });
-  const filePath = path.join(uploadDir, 'import-example.xlsx');
-
+// Generate example Excel file buffer
+async function generateExampleBuffer(): Promise<Buffer> {
   const wsData = [
     ['passage', 'type', 'question', 'choice1', 'choice2', 'choice3', 'choice4', 'correct', 'image'],
     ['', 'mcq', 'What is the largest organ in the human body?', 'Liver', 'Skin', 'Brain', 'Heart', 'B', ''],
@@ -51,9 +47,7 @@ async function generateExampleFile(): Promise<string> {
   ws['!cols'] = [{ wch: 45 }, { wch: 12 }, { wch: 50 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 25 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Questions');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-  await writeFile(filePath, buf);
-  return `/uploads/import-example.xlsx`;
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
 
 async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestion[] }> {
@@ -72,13 +66,11 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
 
   for (const block of blocks) {
     const imgMatch = block.match(/<img[^>]+src="([^"]+)"[^>]*>/i);
-    const textContent = block.replace(/<[^>]+>/g, '').trim();
-
-    if (imgMatch && !textContent) {
+    if (imgMatch) {
       pendingImage = imgMatch[1];
-      continue;
     }
 
+    const textContent = block.replace(/<[^>]+>/g, '').trim();
     if (!textContent) continue;
 
     // Detect Passage
@@ -152,15 +144,23 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
     const type: 'mcq' | 'true_false' = (typeStr.includes('true') || typeStr.includes('tf') || typeStr.includes('صح')) ? 'true_false' : 'mcq';
 
     let imageUrl: string | null = null;
-    const urlCol = row['image'] || row['imageUrl'] || '';
-    if (typeof urlCol === 'string' && urlCol.startsWith('http')) imageUrl = urlCol;
+    const rawImg = String(
+      row['image'] || row['imageUrl'] || row['imageEmbedded'] || row['صورة'] || row['الصورة'] || ''
+    ).trim();
 
-    const imgCol = row['imageEmbedded'] || '';
-    if (typeof imgCol === 'string' && imgCol.startsWith('data:image')) {
-      const base64Data = imgCol.split(',')[1];
-      if (base64Data) {
-        const ext = imgCol.includes('png') ? 'png' : 'jpg';
-        imageUrl = await saveImageToDisk(Buffer.from(base64Data, 'base64'), ext);
+    if (rawImg) {
+      if (rawImg.startsWith('http://') || rawImg.startsWith('https://') || rawImg.startsWith('/uploads/')) {
+        imageUrl = rawImg;
+      } else if (rawImg.startsWith('data:image')) {
+        const base64Data = rawImg.split(',')[1];
+        if (base64Data) {
+          const ext = rawImg.includes('png') ? 'png' : 'jpg';
+          imageUrl = await saveImageToDisk(Buffer.from(base64Data, 'base64'), ext);
+        }
+      } else if (rawImg.length > 50) {
+        try {
+          imageUrl = await saveImageToDisk(Buffer.from(rawImg, 'base64'), 'jpg');
+        } catch { /* silent */ }
       }
     }
 
@@ -191,11 +191,16 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
   return { questions };
 }
 
-// GET: Generate and return example file URL
+// GET: Stream example file directly as attachment
 export async function GET() {
   try {
-    const url = await generateExampleFile();
-    return NextResponse.json({ url });
+    const buf = await generateExampleBuffer();
+    return new NextResponse(buf, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="import-example.xlsx"',
+      },
+    });
   } catch (error) {
     console.error('Example generation error:', error);
     return NextResponse.json({ error: 'Failed to generate example' }, { status: 500 });
