@@ -51,6 +51,8 @@ model Quiz {
 model Question {
   id        String   @id @default(cuid())
   text      String
+  passage   String?
+  type      String   @default("mcq") // "mcq" or "true_false"
   imageUrl  String?
   order     Int      @default(0)
   points    Int      @default(1)

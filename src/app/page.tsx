@@ -25,10 +25,10 @@ import { toast } from "sonner";
 type User = { id: string; email: string; name: string | null; role: string };
 type Subject = { id: string; name: string; description: string | null; quizCount: number; pendingQuizzes: number; quizzes: Quiz[] };
 type Quiz = { id: string; title: string; description: string | null; durationMinutes: number; questionCount: number; attemptCount: number; subjectName: string; order: number; status: string | null };
-type QuizQuestion = { id: string; text: string; imageUrl: string | null; points: number; choices: string[] };
-type ReviewQuestion = { id: string; text: string; imageUrl: string | null; points: number; choices: { id: string; text: string; isCorrect: boolean }[]; correct: number; picked: number | null };
+type QuizQuestion = { id: string; text: string; passage?: string | null; type?: "mcq" | "true_false"; imageUrl: string | null; points: number; choices: string[] };
+type ReviewQuestion = { id: string; text: string; passage?: string | null; type?: "mcq" | "true_false"; imageUrl: string | null; points: number; choices: { id: string; text: string; isCorrect: boolean }[]; correct: number; picked: number | null };
 type AttemptResult = { id: string; score: number; totalPoints: number; startedAt: string; submittedAt: string; quiz: { id: string; title: string; subjectName: string }; percent: number; userName?: string | null };
-type ImportQuestion = { text: string; imageUrl: string | null; choices: { text: string; isCorrect: boolean }[] };
+type ImportQuestion = { text: string; passage?: string | null; type?: "mcq" | "true_false"; imageUrl: string | null; choices: { text: string; isCorrect: boolean }[] };
 
 type View = "home" | "subject" | "quiz" | "dashboard" | "admin" | "auth";
 
@@ -96,6 +96,42 @@ export default function QuizBank() {
   const [importLoading, setImportLoading] = useState(false);
   const importFileRef = useRef<HTMLInputElement>(null);
   const confirmFileRef = useRef<HTMLInputElement>(null);
+
+  // Manual Question Dialog state
+  const [questionDialog, setQuestionDialog] = useState(false);
+  const [qQuizId, setQQuizId] = useState("");
+  const [qText, setQText] = useState("");
+  const [qPassage, setQPassage] = useState("");
+  const [qType, setQType] = useState<"mcq" | "true_false">("mcq");
+  const [qImageUrl, setQImageUrl] = useState<string | null>(null);
+  const [qUploading, setQUploading] = useState(false);
+  const [qChoices, setQChoices] = useState<{ text: string; isCorrect: boolean }[]>([
+    { text: "", isCorrect: true },
+    { text: "", isCorrect: false },
+    { text: "", isCorrect: false },
+    { text: "", isCorrect: false },
+  ]);
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setQUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const data = await api("/api/upload", { method: "POST", body: formData });
+      if (data.url) {
+        setQImageUrl(data.url);
+        toast.success("Image uploaded & compressed");
+      } else {
+        toast.error("Image upload failed");
+      }
+    } catch {
+      toast.error("Image upload failed");
+    } finally {
+      setQUploading(false);
+    }
+  };
 
   // Timer
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -325,6 +361,38 @@ export default function QuizBank() {
     const data = await api(`/api/quizzes?id=${id}`, { method: "DELETE" });
     if (data.error) { toast.error(data.error); return; }
     toast.success("Quiz deleted");
+    loadSubjects();
+  };
+
+  // Admin: Save question
+  const saveQuestion = async () => {
+    if (!qQuizId || !qText.trim()) { toast.error("Please fill in the question text and select a quiz"); return; }
+    const activeChoices = qType === "true_false"
+      ? [
+          { text: qChoices[0]?.text || "صح", isCorrect: qChoices[0]?.isCorrect ?? true },
+          { text: qChoices[1]?.text || "خطأ", isCorrect: !(qChoices[0]?.isCorrect ?? true) }
+        ]
+      : qChoices.filter(c => c.text.trim().length > 0);
+
+    if (activeChoices.length < 2) { toast.error("At least 2 choices are required"); return; }
+    if (!activeChoices.some(c => c.isCorrect)) { toast.error("Please mark at least one correct choice"); return; }
+
+    const data = await api("/api/questions", {
+      method: "POST",
+      body: JSON.stringify({
+        quizId: qQuizId,
+        text: qText,
+        passage: qPassage.trim() || null,
+        type: qType,
+        imageUrl: qImageUrl,
+        choices: activeChoices
+      })
+    });
+
+    if (data.error) { toast.error(data.error); return; }
+    toast.success("Question added successfully");
+    setQuestionDialog(false);
+    setQText(""); setQPassage(""); setQImageUrl(null);
     loadSubjects();
   };
 
@@ -679,29 +747,66 @@ export default function QuizBank() {
                 <div className="space-y-4">
                   {quizData.questions.map((q, qi) => (
                     <motion.div key={q.id} id={`q-${qi}`} className={`bg-card border rounded-xl p-4 scroll-mt-40 transition-colors ${quizAnswers[qi] !== null ? "border-primary" : "border-border"}`}>
-                      {q.imageUrl && (
-                        <div className="mb-3 rounded-lg overflow-hidden bg-secondary">
-                          <img src={q.imageUrl} alt="Question image" className="max-h-64 w-auto mx-auto object-contain" />
+                      {/* Reading Passage */}
+                      {q.passage && (
+                        <div className="mb-4 p-3.5 rounded-xl bg-primary/5 border border-primary/20 text-sm leading-relaxed">
+                          <div className="font-bold text-xs text-primary mb-1.5 flex items-center gap-1.5">
+                            <BookOpen className="w-4 h-4" /> قطعة قراءة / Passage
+                          </div>
+                          <p className="whitespace-pre-wrap text-foreground font-medium">{q.passage}</p>
                         </div>
                       )}
+
+                      {/* Full-width responsive image */}
+                      {q.imageUrl && (
+                        <div className="my-3 w-full rounded-xl overflow-hidden border border-border bg-black/5 flex justify-center items-center p-2">
+                          <img src={q.imageUrl} alt="Question image" className="w-full max-h-[450px] object-contain rounded-lg shadow-sm" />
+                        </div>
+                      )}
+
                       <div className="flex items-start gap-2 mb-3">
                         <span className="flex items-center justify-center w-6 h-6 rounded-full bg-secondary text-primary text-xs font-bold shrink-0 mt-0.5">{qi + 1}</span>
                         <p className="font-medium text-sm leading-relaxed">{q.text}{q.points > 1 ? ` (${q.points} pts)` : ""}</p>
                       </div>
-                      <div className="space-y-1.5 ml-8">
-                        {q.choices.map((choice, ci) => (
-                          <label key={ci} className={`quiz-choice flex items-center gap-3 p-2.5 rounded-lg border ${quizAnswers[qi] === ci ? "selected border-primary bg-secondary" : "border-transparent"}`} onClick={() => {
-                            const newAnswers = [...quizAnswers];
-                            newAnswers[qi] = ci;
-                            setQuizAnswers(newAnswers);
-                          }}>
-                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${quizAnswers[qi] === ci ? "border-primary" : "border-muted-foreground/30"}`}>
-                              {quizAnswers[qi] === ci && <div className="w-2 h-2 rounded-full bg-primary" />}
-                            </div>
-                            <span className="text-sm">{choice}</span>
-                          </label>
-                        ))}
-                      </div>
+
+                      {/* True / False vs MCQ Choices */}
+                      {q.type === "true_false" ? (
+                        <div className="grid grid-cols-2 gap-3 sm:max-w-md mt-2">
+                          {q.choices.map((choice, ci) => (
+                            <button
+                              key={ci}
+                              type="button"
+                              onClick={() => {
+                                const newAnswers = [...quizAnswers];
+                                newAnswers[qi] = ci;
+                                setQuizAnswers(newAnswers);
+                              }}
+                              className={`p-3.5 rounded-xl border-2 font-bold text-sm flex items-center justify-center gap-2 transition-all ${
+                                quizAnswers[qi] === ci
+                                  ? (ci === 0 ? "border-green-600 bg-green-600 text-white shadow-md" : "border-red-600 bg-red-600 text-white shadow-md")
+                                  : "border-border bg-card hover:bg-secondary text-foreground"
+                              }`}
+                            >
+                              {choice}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5 ml-8">
+                          {q.choices.map((choice, ci) => (
+                            <label key={ci} className={`quiz-choice flex items-center gap-3 p-2.5 rounded-lg border ${quizAnswers[qi] === ci ? "selected border-primary bg-secondary" : "border-transparent"}`} onClick={() => {
+                              const newAnswers = [...quizAnswers];
+                              newAnswers[qi] = ci;
+                              setQuizAnswers(newAnswers);
+                            }}>
+                              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${quizAnswers[qi] === ci ? "border-primary" : "border-muted-foreground/30"}`}>
+                                {quizAnswers[qi] === ci && <div className="w-2 h-2 rounded-full bg-primary" />}
+                              </div>
+                              <span className="text-sm">{choice}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
                     </motion.div>
                   ))}
                 </div>
@@ -729,15 +834,26 @@ export default function QuizBank() {
                     {reviewData.questions.map((q, qi) => {
                       const isCorrect = q.picked === q.correct;
                       return (
-                        <div key={q.id} className={`bg-card border rounded-xl p-4 ${isCorrect ? "border-green-500 bg-green-50" : "border-red-400 bg-red-50"}`}>
+                        <div key={q.id} className={`bg-card border rounded-xl p-4 ${isCorrect ? "border-green-500 bg-green-50/50" : "border-red-400 bg-red-50/50"}`}>
                           <div className={`text-xs font-bold uppercase tracking-wide mb-2 ${isCorrect ? "text-green-600" : "text-red-600"}`}>
                             {isCorrect ? "✓ Correct" : (q.picked === null ? "No answer" : "✗ Incorrect")}
                           </div>
-                          {q.imageUrl && (
-                            <div className="mb-3 rounded-lg overflow-hidden bg-white">
-                              <img src={q.imageUrl} alt="Question image" className="max-h-48 w-auto mx-auto object-contain" />
+
+                          {/* Reading Passage in Review */}
+                          {q.passage && (
+                            <div className="mb-3 p-3 rounded-lg bg-white/80 border text-xs leading-relaxed">
+                              <span className="font-bold text-primary block mb-1">Passage / قطعة:</span>
+                              <p className="whitespace-pre-wrap">{q.passage}</p>
                             </div>
                           )}
+
+                          {/* Full-width Image in Review */}
+                          {q.imageUrl && (
+                            <div className="my-3 w-full rounded-xl overflow-hidden border bg-white flex justify-center items-center p-2">
+                              <img src={q.imageUrl} alt="Question image" className="w-full max-h-[450px] object-contain rounded-lg" />
+                            </div>
+                          )}
+
                           <div className="flex items-start gap-2 mb-3">
                             <span className="flex items-center justify-center w-6 h-6 rounded-full bg-white text-primary text-xs font-bold shrink-0">{qi + 1}</span>
                             <p className="font-medium text-sm">{q.text}</p>
@@ -974,7 +1090,10 @@ export default function QuizBank() {
                                   <h4 className="font-semibold text-sm">{q.title}</h4>
                                   <p className="text-xs text-muted-foreground">{q.questionCount} questions • {q.durationMinutes} min • {q.attemptCount} attempt{q.attemptCount === 1 ? "" : "s"}</p>
                                 </div>
-                                <div className="flex gap-1">
+                                <div className="flex items-center gap-1">
+                                  <Button size="sm" variant="outline" onClick={() => { setQQuizId(q.id); setQText(""); setQPassage(""); setQType("mcq"); setQImageUrl(null); setQChoices([{ text: "", isCorrect: true }, { text: "", isCorrect: false }, { text: "", isCorrect: false }, { text: "", isCorrect: false }]); setQuestionDialog(true); }} className="gap-1 text-xs">
+                                    <Plus className="w-3.5 h-3.5" /> Question
+                                  </Button>
                                   <Button variant="ghost" size="sm" onClick={() => { setEditQuiz(q); setQuizTitle(q.title); setQuizDesc(q.description || ""); setQuizDuration(String(q.durationMinutes)); setQuizSubjectId(s.id); setQuizDialog(true); }}><Edit3 className="w-4 h-4" /></Button>
                                   <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteQuiz(q.id)}><Trash2 className="w-4 h-4" /></Button>
                                 </div>
@@ -1008,12 +1127,17 @@ export default function QuizBank() {
                         <Download className="w-4 h-4" /> Download Example
                       </Button>
                     </div>
-                    <div className="mt-3 p-3 bg-background rounded-lg text-xs text-muted-foreground space-y-1">
-                      <p className="font-semibold text-foreground mb-1">Expected Excel format:</p>
-                      <p><code className="bg-secondary px-1 rounded">question</code> — The question text</p>
-                      <p><code className="bg-secondary px-1 rounded">choice1</code> to <code className="bg-secondary px-1 rounded">choice4</code> — Answer choices</p>
-                      <p><code className="bg-secondary px-1 rounded">correct</code> — Correct answer letter (A, B, C, D)</p>
-                      <p><code className="bg-secondary px-1 rounded">image</code> — (optional) Image URL</p>
+                    <div className="mt-3 p-3 bg-background rounded-lg text-xs text-muted-foreground space-y-1.5 border">
+                      <p className="font-semibold text-foreground mb-1">Expected Excel Columns & Format:</p>
+                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">passage</code> — (optional) Reading passage or case study text</p>
+                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">type</code> — (optional) <code className="font-bold">mcq</code> or <code className="font-bold">true_false</code> (defaults to mcq)</p>
+                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">question</code> — The question text</p>
+                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">choice1</code> .. <code className="bg-secondary px-1 rounded text-primary font-mono">choice4</code> — Answer choices</p>
+                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">correct</code> — Correct answer letter (A, B, C, D) or 1..4</p>
+                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">image</code> — (optional) Image URL or embedded image</p>
+                      <div className="pt-2 border-t text-[11px] text-muted-foreground">
+                        <span className="font-bold text-foreground">Word (.docx) Support:</span> Paste images directly into Word! Add passages by starting a paragraph with <code className="bg-secondary px-1 rounded">[Passage: ...]</code> or <code className="bg-secondary px-1 rounded">[قطعة: ...]</code>.
+                      </div>
                     </div>
                   </Card>
 
@@ -1113,6 +1237,157 @@ export default function QuizBank() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setQuizDialog(false)}>Cancel</Button>
             <Button onClick={saveQuiz} disabled={!quizTitle.trim() || !quizSubjectId}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== Question Dialog ===== */}
+      <Dialog open={questionDialog} onOpenChange={setQuestionDialog}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto custom-scroll">
+          <DialogHeader>
+            <DialogTitle>Add New Question</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Question Type / نوع السؤال</Label>
+              <div className="flex gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQType("mcq");
+                    if (qChoices.length < 4) {
+                      setQChoices([
+                        { text: "", isCorrect: true },
+                        { text: "", isCorrect: false },
+                        { text: "", isCorrect: false },
+                        { text: "", isCorrect: false },
+                      ]);
+                    }
+                  }}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-all ${qType === "mcq" ? "bg-primary text-white border-primary shadow-sm" : "border-border hover:bg-secondary"}`}
+                >
+                  MCQ (اختيار من متعدد)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQType("true_false");
+                    setQChoices([
+                      { text: "صح", isCorrect: true },
+                      { text: "خطأ", isCorrect: false }
+                    ]);
+                  }}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-all ${qType === "true_false" ? "bg-primary text-white border-primary shadow-sm" : "border-border hover:bg-secondary"}`}
+                >
+                  True / False (صح أم خطأ)
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <Label>Reading Passage / قطعة قراءة (optional)</Label>
+              <textarea
+                rows={3}
+                value={qPassage}
+                onChange={e => setQPassage(e.target.value)}
+                placeholder="Enter context, medical case study, or passage text..."
+                className="w-full mt-1 p-2.5 border border-border rounded-lg text-sm bg-background"
+              />
+            </div>
+
+            <div>
+              <Label>Question Text *</Label>
+              <Input
+                value={qText}
+                onChange={e => setQText(e.target.value)}
+                placeholder="Enter question text..."
+                className="mt-1"
+              />
+            </div>
+
+            {/* Image Upload */}
+            <div>
+              <Label>Question Image (optional - direct file upload)</Label>
+              <div className="mt-1 flex flex-col gap-2">
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  disabled={qUploading}
+                  className="text-xs"
+                />
+                {qUploading && <p className="text-xs text-muted-foreground animate-pulse">Uploading & compressing image...</p>}
+                {qImageUrl && (
+                  <div className="relative border rounded-xl overflow-hidden bg-black/5 p-2 flex flex-col items-center gap-2">
+                    <img src={qImageUrl} alt="Uploaded preview" className="w-full max-h-48 object-contain rounded-lg shadow-sm" />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => setQImageUrl(null)}
+                      className="gap-1 text-xs"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Remove Image
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Choices */}
+            <div>
+              <Label className="mb-2 block font-semibold">
+                {qType === "true_false" ? "Select Correct Answer" : "Answer Choices & Mark Correct"}
+              </Label>
+              {qType === "true_false" ? (
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setQChoices([{ text: "صح", isCorrect: true }, { text: "خطأ", isCorrect: false }])}
+                    className={`flex-1 py-2.5 rounded-lg border-2 font-bold text-sm ${qChoices[0]?.isCorrect ? "border-green-600 bg-green-500 text-white" : "border-border hover:bg-secondary"}`}
+                  >
+                    صح (True) ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQChoices([{ text: "صح", isCorrect: false }, { text: "خطأ", isCorrect: true }])}
+                    className={`flex-1 py-2.5 rounded-lg border-2 font-bold text-sm ${!qChoices[0]?.isCorrect ? "border-red-600 bg-red-500 text-white" : "border-border hover:bg-secondary"}`}
+                  >
+                    خطأ (False) ✓
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {qChoices.map((choice, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="correctChoice"
+                        checked={choice.isCorrect}
+                        onChange={() => {
+                          setQChoices(qChoices.map((c, i) => ({ ...c, isCorrect: i === idx })));
+                        }}
+                        className="w-4 h-4 text-primary"
+                      />
+                      <Input
+                        value={choice.text}
+                        onChange={e => {
+                          const newChoices = [...qChoices];
+                          newChoices[idx].text = e.target.value;
+                          setQChoices(newChoices);
+                        }}
+                        placeholder={`Choice ${String.fromCharCode(65 + idx)}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setQuestionDialog(false)}>Cancel</Button>
+            <Button onClick={saveQuestion} disabled={!qText.trim()}>Save Question</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

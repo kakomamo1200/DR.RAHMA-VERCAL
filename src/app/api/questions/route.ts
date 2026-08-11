@@ -9,16 +9,16 @@ export async function GET(request: NextRequest) {
     const quiz = await db.quiz.findUnique({ where: { id: quizId } });
     if (!quiz) return NextResponse.json({ error: 'Quiz not found' }, { status: 404 });
     const questions = await db.question.findMany({ where: { quizId }, orderBy: { order: 'asc' }, include: { choices: { orderBy: { order: 'asc' } } } });
-    return NextResponse.json({ quiz: { id: quiz.id, title: quiz.title, description: quiz.description, durationMinutes: quiz.durationMinutes }, questions: questions.map(q => ({ id: q.id, text: q.text, imageUrl: q.imageUrl, order: q.order, points: q.points, choices: q.choices.map(c => ({ id: c.id, text: c.text, isCorrect: c.isCorrect, order: c.order })) })) });
+    return NextResponse.json({ quiz: { id: quiz.id, title: quiz.title, description: quiz.description, durationMinutes: quiz.durationMinutes }, questions: questions.map(q => ({ id: q.id, text: q.text, passage: q.passage || null, type: q.type || 'mcq', imageUrl: q.imageUrl, order: q.order, points: q.points, choices: q.choices.map(c => ({ id: c.id, text: c.text, isCorrect: c.isCorrect, order: c.order })) })) });
   } catch (error) { console.error('Questions GET error:', error); return NextResponse.json({ error: 'Something went wrong' }, { status: 500 }); }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const user = await getUserFromRequest(request); if (!user || !requireAdmin(user)) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    const { quizId, text, imageUrl, order, points, choices } = await request.json();
+    const { quizId, text, passage, type, imageUrl, order, points, choices } = await request.json();
     if (!quizId || !text || !choices?.length) return NextResponse.json({ error: 'Incomplete question data' }, { status: 400 });
-    const question = await db.question.create({ data: { quizId, text, imageUrl: imageUrl || null, order: order ?? 0, points: points || 1, choices: { create: choices.map((c: { text: string; isCorrect: boolean; order?: number }, i: number) => ({ text: c.text, isCorrect: c.isCorrect || false, order: c.order ?? i })) } }, include: { choices: true } });
+    const question = await db.question.create({ data: { quizId, text, passage: passage || null, type: type || 'mcq', imageUrl: imageUrl || null, order: order ?? 0, points: points || 1, choices: { create: choices.map((c: { text: string; isCorrect: boolean; order?: number }, i: number) => ({ text: c.text, isCorrect: c.isCorrect || false, order: c.order ?? i })) } }, include: { choices: true } });
     return NextResponse.json({ question });
   } catch (error) { console.error('Questions POST error:', error); return NextResponse.json({ error: 'Something went wrong' }, { status: 500 }); }
 }

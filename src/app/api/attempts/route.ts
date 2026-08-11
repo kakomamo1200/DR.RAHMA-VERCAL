@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
       const questions = await db.question.findMany({ where: { quizId: attempt.quizId }, orderBy: { order: 'asc' }, include: { choices: { orderBy: { order: 'asc' } } } });
       const answersMap: Record<string, string | null> = {}; attempt.answers.forEach(a => { answersMap[a.questionId] = a.choiceId; });
       let score = 0; let totalPoints = 0;
-      const reviewQuestions = questions.map(q => { totalPoints += q.points; const pickedId = answersMap[q.id] || null; const correctChoice = q.choices.find(c => c.isCorrect); const isCorrect = pickedId === correctChoice?.id; if (isCorrect) score += q.points; return { id: q.id, text: q.text, imageUrl: q.imageUrl, points: q.points, choices: q.choices.map(c => ({ id: c.id, text: c.text, isCorrect: c.isCorrect })), correct: q.choices.findIndex(c => c.isCorrect), picked: pickedId ? q.choices.findIndex(c => c.id === pickedId) : null }; });
+      const reviewQuestions = questions.map(q => { totalPoints += q.points; const pickedId = answersMap[q.id] || null; const correctChoice = q.choices.find(c => c.isCorrect); const isCorrect = pickedId === correctChoice?.id; if (isCorrect) score += q.points; return { id: q.id, text: q.text, passage: q.passage || null, type: q.type || 'mcq', imageUrl: q.imageUrl, points: q.points, choices: q.choices.map(c => ({ id: c.id, text: c.text, isCorrect: c.isCorrect })), correct: q.choices.findIndex(c => c.isCorrect), picked: pickedId ? q.choices.findIndex(c => c.id === pickedId) : null }; });
       return NextResponse.json({ score, totalPoints, percent: totalPoints ? Math.round((score / totalPoints) * 100) : 0, questions: reviewQuestions });
     }
 
@@ -61,13 +61,13 @@ export async function POST(request: NextRequest) {
         const questions = await db.question.findMany({ where: { quizId }, orderBy: { order: 'asc' }, include: { choices: { orderBy: { order: 'asc' } } } });
         const savedAnswers = await db.answer.findMany({ where: { attemptId: inProgress.id } });
         const answersArr = questions.map(q => { const a = savedAnswers.find(sa => sa.questionId === q.id); return a?.choiceId ? q.choices.findIndex(c => c.id === a.choiceId) : null; });
-        return NextResponse.json({ status: 'resumed', attemptId: inProgress.id, startedAt: inProgress.startedAt.getTime(), serverNow: Date.now(), durationMin: inProgress.quiz.durationMinutes, questions: questions.map(q => ({ id: q.id, text: q.text, imageUrl: q.imageUrl, points: q.points, choices: q.choices.map(c => c.text) })), answers: answersArr });
+        return NextResponse.json({ status: 'resumed', attemptId: inProgress.id, startedAt: inProgress.startedAt.getTime(), serverNow: Date.now(), durationMin: inProgress.quiz.durationMinutes, questions: questions.map(q => ({ id: q.id, text: q.text, passage: q.passage || null, type: q.type || 'mcq', imageUrl: q.imageUrl, points: q.points, choices: q.choices.map(c => c.text) })), answers: answersArr });
       }
       const quiz = await db.quiz.findUnique({ where: { id: quizId } });
       if (!quiz) return NextResponse.json({ error: 'Quiz not found' }, { status: 404 });
       const attempt = await db.attempt.create({ data: { quizId, userId: user.id, startedAt: new Date() } });
       const questions = await db.question.findMany({ where: { quizId }, orderBy: { order: 'asc' }, include: { choices: { orderBy: { order: 'asc' } } } });
-      return NextResponse.json({ status: 'started', attemptId: attempt.id, startedAt: attempt.startedAt.getTime(), serverNow: Date.now(), durationMin: quiz.durationMinutes, questions: questions.map(q => ({ id: q.id, text: q.text, imageUrl: q.imageUrl, points: q.points, choices: q.choices.map(c => c.text) })), answers: questions.map(() => null) });
+      return NextResponse.json({ status: 'started', attemptId: attempt.id, startedAt: attempt.startedAt.getTime(), serverNow: Date.now(), durationMin: quiz.durationMinutes, questions: questions.map(q => ({ id: q.id, text: q.text, passage: q.passage || null, type: q.type || 'mcq', imageUrl: q.imageUrl, points: q.points, choices: q.choices.map(c => c.text) })), answers: questions.map(() => null) });
     }
 
     if (action === 'save') {
