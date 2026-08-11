@@ -71,7 +71,7 @@ export default function QuizBank() {
   const [reviewData, setReviewData] = useState<{ score: number; totalPoints: number; percent: number; questions: ReviewQuestion[] } | null>(null);
 
   // Auth form state
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authMode, setAuthMode] = useState<"login" | "register" | "reset">("login");
   const [authRole, setAuthRole] = useState<"student" | "teacher">("student");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -237,6 +237,31 @@ export default function QuizBank() {
       toast.error(data.error || "Something went wrong");
     }
     setAuthLoading(false);
+  };
+
+  const handleResetPassword = async () => {
+    if (!authEmail.trim() || !authPassword.trim()) {
+      toast.error("Please enter your email and new password");
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      const data = await api("/api/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({ email: authEmail, newPassword: authPassword }),
+      });
+      if (data.success) {
+        toast.success("Password reset successfully! You can now log in.");
+        setAuthMode("login");
+        setAuthPassword("");
+      } else {
+        toast.error(data.error || "Failed to reset password");
+      }
+    } catch {
+      toast.error("Failed to reset password");
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const logout = () => {
@@ -970,10 +995,16 @@ export default function QuizBank() {
                     {authRole === "teacher" ? <Shield className="w-6 h-6 text-primary" /> : <LogIn className="w-6 h-6 text-blue-600" />}
                   </div>
                   <h2 className="text-xl font-bold">
-                    {authRole === "teacher" ? "Teacher Sign In" : authMode === "login" ? "Student Sign In" : "Student Sign Up"}
+                    {authRole === "teacher" ? "Teacher Sign In" : authMode === "reset" ? "Reset Password" : authMode === "login" ? "Student Sign In" : "Student Sign Up"}
                   </h2>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {authRole === "teacher" ? "Access the teacher management panel" : authMode === "login" ? "Login to take quizzes" : "Create a new student account"}
+                    {authRole === "teacher"
+                      ? "Access the teacher management panel"
+                      : authMode === "reset"
+                      ? "Enter your email and new password"
+                      : authMode === "login"
+                      ? "Login to take quizzes"
+                      : "Create a new student account"}
                   </p>
                 </div>
 
@@ -1001,22 +1032,41 @@ export default function QuizBank() {
                     <Input type="email" placeholder="you@example.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="mt-1" />
                   </div>
                   <div>
-                    <Label>Password</Label>
+                    <div className="flex justify-between items-center">
+                      <Label>{authMode === "reset" ? "New Password" : "Password"}</Label>
+                      {authMode === "login" && (
+                        <button type="button" onClick={() => setAuthMode("reset")} className="text-xs text-primary font-medium hover:underline">
+                          Forgot? / نسيت السر؟
+                        </button>
+                      )}
+                    </div>
                     <Input type="password" placeholder="•••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" />
                   </div>
-                  <Button onClick={handleAuth} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
-                    {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
-                    {authRole === "teacher" ? "Sign In as Teacher" : authMode === "login" ? "Sign In" : "Create Account"}
-                  </Button>
+
+                  {authMode === "reset" ? (
+                    <Button onClick={handleResetPassword} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
+                      {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
+                      Reset Password / تغيير كلمة المرور
+                    </Button>
+                  ) : (
+                    <Button onClick={handleAuth} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
+                      {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
+                      {authRole === "teacher" ? "Sign In as Teacher" : authMode === "login" ? "Sign In" : "Create Account"}
+                    </Button>
+                  )}
                 </div>
 
-                {authRole === "student" && (
-                  <div className="mt-4 text-center text-sm">
+                <div className="mt-4 text-center text-sm space-y-1">
+                  {authMode === "reset" ? (
+                    <button onClick={() => setAuthMode("login")} className="text-primary font-semibold hover:underline text-xs">
+                      Back to Sign In / العودة لتسجيل الدخول
+                    </button>
+                  ) : authRole === "student" ? (
                     <button onClick={() => setAuthMode(authMode === "login" ? "register" : "login")} className="text-primary font-semibold hover:underline">
                       {authMode === "login" ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
                     </button>
-                  </div>
-                )}
+                  ) : null}
+                </div>
               </Card>
             </motion.div>
           )}
