@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
           description: s.description,
           order: s.order,
           quizCount: playableQuizzes.length,
-          quizzes: s.quizzes.map(q => ({ id: q.id, title: q.title, description: q.description, durationMinutes: q.durationMinutes, questionCount: q._count.questions, order: q.order })),
+          quizzes: s.quizzes.map(q => ({ id: q.id, title: q.title, description: q.description, durationMinutes: q.durationMinutes, startDate: q.startDate, endDate: q.endDate, questionCount: q._count.questions, order: q.order })),
           pendingQuizzes: pendingCounts[s.id] || 0
         };
       })

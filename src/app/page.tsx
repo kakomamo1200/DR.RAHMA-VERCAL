@@ -221,6 +221,18 @@ export default function QuizBank() {
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
 
+  const formatForDatetimeInput = (dateStr?: string | Date | null) => {
+    if (!dateStr) return "";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return "";
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch {
+      return "";
+    }
+  };
+
   // Auth handlers
   const handleAuth = async () => {
     setAuthLoading(true);
@@ -1206,8 +1218,8 @@ export default function QuizBank() {
                                     setQuizTitle(q.title);
                                     setQuizDesc(q.description || "");
                                     setQuizDuration(String(q.durationMinutes));
-                                    setQuizStartDate(q.startDate ? new Date(q.startDate).toISOString().slice(0, 16) : "");
-                                    setQuizEndDate(q.endDate ? new Date(q.endDate).toISOString().slice(0, 16) : "");
+                                    setQuizStartDate(formatForDatetimeInput(q.startDate));
+                                    setQuizEndDate(formatForDatetimeInput(q.endDate));
                                     setQuizSubjectId(s.id);
                                     setQuizDialog(true);
                                   }}><Edit3 className="w-4 h-4" /></Button>

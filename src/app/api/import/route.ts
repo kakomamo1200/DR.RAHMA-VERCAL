@@ -144,31 +144,32 @@ async function extractExcelDrawingRowMap(zip: JSZip): Promise<Record<number, str
   const rowToImageMap: Record<number, string> = {};
 
   try {
-    const drawingFiles = Object.keys(zip.files).filter(f => /^xl\/drawings\/drawing\d+\.xml$/i.test(f));
+    const drawingFiles = Object.keys(zip.files).filter(f => /drawings\/drawing.*\.xml$/i.test(f));
 
     for (const drawingPath of drawingFiles) {
-      const relsPath = drawingPath.replace(/xl\/drawings\/(drawing\d+\.xml)/i, 'xl/drawings/_rels/$1.rels');
-      const relsFile = zip.files[relsPath];
+      const filename = drawingPath.split('/').pop();
+      const relsFile = Object.keys(zip.files).find(f => f.toLowerCase().endsWith(`${filename}.rels`.toLowerCase()));
       const drawingFile = zip.files[drawingPath];
 
-      if (!relsFile || !drawingFile) continue;
+      if (!drawingFile) continue;
 
-      const relsXml = await relsFile.async('string');
-      const drawingXml = await drawingFile.async('string');
-
-      // Map rId -> media file path (e.g. rId1 -> xl/media/image1.png)
       const rIdToMediaPath: Record<string, string> = {};
-      const relRegex = /<Relationship[^>]+Id="([^"]+)"[^>]+Target="([^"]+)"/g;
-      let relMatch;
-      while ((relMatch = relRegex.exec(relsXml)) !== null) {
-        const id = relMatch[1];
-        let target = relMatch[2];
-        if (target.startsWith('../')) target = 'xl/' + target.slice(3);
-        else if (!target.startsWith('xl/')) target = 'xl/media/' + target.split('/').pop();
-        rIdToMediaPath[id] = target;
+      if (relsFile && zip.files[relsFile]) {
+        const relsXml = await zip.files[relsFile].async('string');
+        const relRegex = /<Relationship[^>]+Id="([^"]+)"[^>]+Target="([^"]+)"/gi;
+        let relMatch;
+        while ((relMatch = relRegex.exec(relsXml)) !== null) {
+          const id = relMatch[1];
+          const target = relMatch[2];
+          const mediaName = target.split('/').pop();
+          const actualMediaPath = Object.keys(zip.files).find(f => f.toLowerCase().endsWith(mediaName?.toLowerCase() || ''));
+          if (actualMediaPath) {
+            rIdToMediaPath[id] = actualMediaPath;
+          }
+        }
       }
 
-      // Find all anchors and extract row index and rId
+      const drawingXml = await drawingFile.async('string');
       const anchors = drawingXml.split(/<xdr:(?:twoCellAnchor|oneCellAnchor)/i);
 
       for (const anchor of anchors) {
@@ -263,7 +264,7 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
       }
     }
 
-    // Match exact Excel row index from drawing XML
+    // Match exact Excel row index from drawing XML (Row 0 is header, so row rIdx+1 is Excel data row index)
     if (!imageUrl) {
       const targetImage = rowToImageMap[rIdx + 1] || rowToImageMap[rIdx + 2] || rowToImageMap[rIdx];
       if (targetImage) {
@@ -271,8 +272,8 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
       }
     }
 
-    // Fall back to sequential image list only if no drawing row map exists at all
-    if (!imageUrl && Object.keys(rowToImageMap).length === 0 && fallbackImageIndex < fallbackImages.length) {
+    // Fall back to sequential image list ONLY if the image column has an indicator (non-empty rawImg)
+    if (!imageUrl && rawImg && fallbackImageIndex < fallbackImages.length) {
       imageUrl = fallbackImages[fallbackImageIndex++];
     }
 
