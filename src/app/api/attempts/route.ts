@@ -10,6 +10,28 @@ export async function GET(request: NextRequest) {
     const quizId = searchParams.get('quizId');
     const type = searchParams.get('type');
 
+    // Teacher: student preview
+    if (type === 'preview') {
+      if (!requireAdmin(user)) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      if (!quizId) return NextResponse.json({ error: 'Quiz ID is required' }, { status: 400 });
+      const quiz = await db.quiz.findUnique({ where: { id: quizId } });
+      if (!quiz) return NextResponse.json({ error: 'Quiz not found' }, { status: 404 });
+      const questions = await db.question.findMany({ where: { quizId }, orderBy: { order: 'asc' }, include: { choices: { orderBy: { order: 'asc' } } } });
+      return NextResponse.json({
+        title: quiz.title,
+        durationMinutes: quiz.durationMinutes,
+        questions: questions.map(q => ({
+          id: q.id,
+          text: q.text,
+          passage: q.passage || null,
+          type: q.type || 'mcq',
+          imageUrl: q.imageUrl,
+          points: q.points,
+          choices: q.choices.map(c => c.text)
+        }))
+      });
+    }
+
     // Student: own results
     if (type === 'dashboard') {
       const attempts = await db.attempt.findMany({ where: { userId: user.id, submittedAt: { not: null } }, orderBy: { submittedAt: 'desc' }, include: { quiz: { include: { subject: { select: { name: true } } } } } });
@@ -65,6 +87,13 @@ export async function POST(request: NextRequest) {
       }
       const quiz = await db.quiz.findUnique({ where: { id: quizId } });
       if (!quiz) return NextResponse.json({ error: 'Quiz not found' }, { status: 404 });
+      const now = new Date();
+      if (quiz.startDate && now < new Date(quiz.startDate)) {
+        return NextResponse.json({ error: 'This quiz has not started yet.' }, { status: 400 });
+      }
+      if (quiz.endDate && now > new Date(quiz.endDate)) {
+        return NextResponse.json({ error: 'This quiz has expired and is no longer available.' }, { status: 400 });
+      }
       const attempt = await db.attempt.create({ data: { quizId, userId: user.id, startedAt: new Date() } });
       const questions = await db.question.findMany({ where: { quizId }, orderBy: { order: 'asc' }, include: { choices: { orderBy: { order: 'asc' } } } });
       return NextResponse.json({ status: 'started', attemptId: attempt.id, startedAt: attempt.startedAt.getTime(), serverNow: Date.now(), durationMin: quiz.durationMinutes, questions: questions.map(q => ({ id: q.id, text: q.text, passage: q.passage || null, type: q.type || 'mcq', imageUrl: q.imageUrl, points: q.points, choices: q.choices.map(c => c.text) })), answers: questions.map(() => null) });

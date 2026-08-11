@@ -24,7 +24,7 @@ import { toast } from "sonner";
 // ============ Types ============
 type User = { id: string; email: string; name: string | null; role: string };
 type Subject = { id: string; name: string; description: string | null; quizCount: number; pendingQuizzes: number; quizzes: Quiz[] };
-type Quiz = { id: string; title: string; description: string | null; durationMinutes: number; questionCount: number; attemptCount: number; subjectName: string; order: number; status: string | null };
+type Quiz = { id: string; title: string; description: string | null; durationMinutes: number; startDate?: string | null; endDate?: string | null; questionCount: number; attemptCount: number; subjectName: string; order: number; status: string | null };
 type QuizQuestion = { id: string; text: string; passage?: string | null; type?: "mcq" | "true_false"; imageUrl: string | null; points: number; choices: string[] };
 type ReviewQuestion = { id: string; text: string; passage?: string | null; type?: "mcq" | "true_false"; imageUrl: string | null; points: number; choices: { id: string; text: string; isCorrect: boolean }[]; correct: number; picked: number | null };
 type AttemptResult = { id: string; score: number; totalPoints: number; startedAt: string; submittedAt: string; quiz: { id: string; title: string; subjectName: string }; percent: number; userName?: string | null };
@@ -89,7 +89,14 @@ export default function QuizBank() {
   const [quizTitle, setQuizTitle] = useState("");
   const [quizDesc, setQuizDesc] = useState("");
   const [quizDuration, setQuizDuration] = useState("40");
+  const [quizStartDate, setQuizStartDate] = useState("");
+  const [quizEndDate, setQuizEndDate] = useState("");
   const [quizSubjectId, setQuizSubjectId] = useState("");
+
+  // Student Preview State for Teacher
+  const [previewDialog, setPreviewDialog] = useState(false);
+  const [previewData, setPreviewData] = useState<{ title: string; durationMinutes: number; questions: QuizQuestion[] } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [importDialog, setImportDialog] = useState(false);
   const [importQuizId, setImportQuizId] = useState("");
   const [importPreview, setImportPreview] = useState<ImportQuestion[]>([]);
@@ -367,17 +374,46 @@ export default function QuizBank() {
   // Admin: Save quiz
   const saveQuiz = async () => {
     if (!quizTitle.trim() || !quizSubjectId) { toast.error("Please fill in all required fields"); return; }
+    const payload = {
+      title: quizTitle,
+      description: quizDesc,
+      durationMinutes: parseInt(quizDuration) || 40,
+      startDate: quizStartDate || null,
+      endDate: quizEndDate || null,
+      subjectId: quizSubjectId
+    };
     if (editQuiz) {
-      await api("/api/quizzes", { method: "PUT", body: JSON.stringify({ id: editQuiz.id, title: quizTitle, description: quizDesc, durationMinutes: parseInt(quizDuration) || 40 }) });
+      await api("/api/quizzes", { method: "PUT", body: JSON.stringify({ id: editQuiz.id, ...payload }) });
       toast.success("Quiz updated");
     } else {
-      await api("/api/quizzes", { method: "POST", body: JSON.stringify({ title: quizTitle, description: quizDesc, durationMinutes: parseInt(quizDuration) || 40, subjectId: quizSubjectId }) });
+      await api("/api/quizzes", { method: "POST", body: JSON.stringify(payload) });
       toast.success("Quiz added");
     }
     setQuizDialog(false);
     setEditQuiz(null);
-    setQuizTitle(""); setQuizDesc(""); setQuizDuration("40");
+    setQuizTitle(""); setQuizDesc(""); setQuizDuration("40"); setQuizStartDate(""); setQuizEndDate("");
     loadSubjects();
+  };
+
+  // Teacher Student Preview Modal Handler
+  const openStudentPreview = async (quizId: string) => {
+    setPreviewLoading(true);
+    setPreviewDialog(true);
+    setPreviewData(null);
+    try {
+      const data = await api(`/api/attempts?type=preview&quizId=${quizId}`);
+      if (data.questions) {
+        setPreviewData(data);
+      } else {
+        toast.error(data.error || "Failed to load preview");
+        setPreviewDialog(false);
+      }
+    } catch {
+      toast.error("Failed to load preview");
+      setPreviewDialog(false);
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   // Admin: Delete quiz (FIXED: check for errors)
@@ -691,29 +727,47 @@ export default function QuizBank() {
                 </Card>
               ) : (
                 <div className="space-y-3">
-                  {quizzes.map((quiz, i) => (
-                    <motion.div key={quiz.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
-                      className="bg-card border border-border rounded-xl p-4 sm:p-5"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1">
-                          <h3 className="font-semibold mb-1">{quiz.title}</h3>
-                          {quiz.description && <p className="text-sm text-muted-foreground mb-2">{quiz.description}</p>}
-                          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1"><HelpCircle className="w-3.5 h-3.5" /> {quiz.questionCount} questions</span>
-                            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {quiz.durationMinutes} min</span>
+                  {quizzes.map((quiz, i) => {
+                    const now = new Date();
+                    const isNotStarted = quiz.startDate && now < new Date(quiz.startDate);
+                    const isExpired = quiz.endDate && now > new Date(quiz.endDate);
+
+                    return (
+                      <motion.div key={quiz.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
+                        className="bg-card border border-border rounded-xl p-4 sm:p-5"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <h3 className="font-semibold mb-1">{quiz.title}</h3>
+                            {quiz.description && <p className="text-sm text-muted-foreground mb-2">{quiz.description}</p>}
+                            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1"><HelpCircle className="w-3.5 h-3.5" /> {quiz.questionCount} questions</span>
+                              <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {quiz.durationMinutes} min</span>
+                              {quiz.startDate && <span className="text-amber-700 font-medium">Starts: {new Date(quiz.startDate).toLocaleDateString()}</span>}
+                              {quiz.endDate && <span className="text-destructive font-medium">Ends: {new Date(quiz.endDate).toLocaleDateString()}</span>}
+                            </div>
                           </div>
+                          {quiz.status === "submitted" ? (
+                            <Badge variant="secondary" className="bg-green-100 text-green-700 shrink-0">Completed ✓</Badge>
+                          ) : isNotStarted ? (
+                            <div className="text-right shrink-0">
+                              <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 block mb-1 text-[11px]">Starts: {new Date(quiz.startDate!).toLocaleString()}</Badge>
+                              <Button disabled size="sm" className="opacity-50">Not Started Yet</Button>
+                            </div>
+                          ) : isExpired ? (
+                            <div className="text-right shrink-0">
+                              <Badge variant="destructive" className="block mb-1 text-[11px]">Expired: {new Date(quiz.endDate!).toLocaleString()}</Badge>
+                              <Button disabled size="sm" className="opacity-50">Expired</Button>
+                            </div>
+                          ) : (
+                            <Button onClick={() => startQuiz(quiz.id)} size="sm" className="shrink-0 gap-1.5">
+                              <Play className="w-4 h-4" /> Start
+                            </Button>
+                          )}
                         </div>
-                        {quiz.status === "submitted" ? (
-                          <Badge variant="secondary" className="bg-green-100 text-green-700 shrink-0">Completed ✓</Badge>
-                        ) : (
-                          <Button onClick={() => startQuiz(quiz.id)} size="sm" className="shrink-0 gap-1.5">
-                            <Play className="w-4 h-4" /> Start
-                          </Button>
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
+                      </motion.div>
+                    );
+                  })}
                 </div>
               )}
             </motion.div>
@@ -1134,13 +1188,29 @@ export default function QuizBank() {
                               <div key={q.id} className="bg-card border border-border rounded-lg p-3 mb-2 flex items-center justify-between">
                                 <div>
                                   <h4 className="font-semibold text-sm">{q.title}</h4>
-                                  <p className="text-xs text-muted-foreground">{q.questionCount} questions • {q.durationMinutes} min • {q.attemptCount} attempt{q.attemptCount === 1 ? "" : "s"}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {q.questionCount} questions • {q.durationMinutes} min • {q.attemptCount} attempt{q.attemptCount === 1 ? "" : "s"}
+                                    {q.startDate && <span className="ml-2 text-amber-700 font-medium">Starts: {new Date(q.startDate).toLocaleDateString()}</span>}
+                                    {q.endDate && <span className="ml-2 text-destructive font-medium">Ends: {new Date(q.endDate).toLocaleDateString()}</span>}
+                                  </p>
                                 </div>
                                 <div className="flex items-center gap-1">
+                                  <Button size="sm" variant="ghost" onClick={() => openStudentPreview(q.id)} title="Student Preview / معاينة الطالب" className="gap-1 text-xs text-primary">
+                                    <Eye className="w-3.5 h-3.5" /> Preview
+                                  </Button>
                                   <Button size="sm" variant="outline" onClick={() => { setQQuizId(q.id); setQText(""); setQPassage(""); setQType("mcq"); setQImageUrl(null); setQChoices([{ text: "", isCorrect: true }, { text: "", isCorrect: false }, { text: "", isCorrect: false }, { text: "", isCorrect: false }]); setQuestionDialog(true); }} className="gap-1 text-xs">
                                     <Plus className="w-3.5 h-3.5" /> Question
                                   </Button>
-                                  <Button variant="ghost" size="sm" onClick={() => { setEditQuiz(q); setQuizTitle(q.title); setQuizDesc(q.description || ""); setQuizDuration(String(q.durationMinutes)); setQuizSubjectId(s.id); setQuizDialog(true); }}><Edit3 className="w-4 h-4" /></Button>
+                                  <Button variant="ghost" size="sm" onClick={() => {
+                                    setEditQuiz(q);
+                                    setQuizTitle(q.title);
+                                    setQuizDesc(q.description || "");
+                                    setQuizDuration(String(q.durationMinutes));
+                                    setQuizStartDate(q.startDate ? new Date(q.startDate).toISOString().slice(0, 16) : "");
+                                    setQuizEndDate(q.endDate ? new Date(q.endDate).toISOString().slice(0, 16) : "");
+                                    setQuizSubjectId(s.id);
+                                    setQuizDialog(true);
+                                  }}><Edit3 className="w-4 h-4" /></Button>
                                   <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteQuiz(q.id)}><Trash2 className="w-4 h-4" /></Button>
                                 </div>
                               </div>
@@ -1279,6 +1349,16 @@ export default function QuizBank() {
             <div><Label>Quiz Title</Label><Input value={quizTitle} onChange={e => setQuizTitle(e.target.value)} placeholder="e.g. Unit 1 Quiz" className="mt-1" /></div>
             <div><Label>Description (optional)</Label><Input value={quizDesc} onChange={e => setQuizDesc(e.target.value)} placeholder="Brief description" className="mt-1" /></div>
             <div><Label>Duration (minutes)</Label><Input type="number" value={quizDuration} onChange={e => setQuizDuration(e.target.value)} className="mt-1" /></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-border">
+              <div>
+                <Label className="text-xs">Start Date & Time (optional)</Label>
+                <Input type="datetime-local" value={quizStartDate} onChange={e => setQuizStartDate(e.target.value)} className="mt-1 text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">End Date & Time (optional)</Label>
+                <Input type="datetime-local" value={quizEndDate} onChange={e => setQuizEndDate(e.target.value)} className="mt-1 text-xs" />
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setQuizDialog(false)}>Cancel</Button>
@@ -1434,6 +1514,90 @@ export default function QuizBank() {
           <DialogFooter className="mt-4">
             <Button variant="outline" onClick={() => setQuestionDialog(false)}>Cancel</Button>
             <Button onClick={saveQuestion} disabled={!qText.trim()}>Save Question</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== Teacher Student-Preview Dialog ===== */}
+      <Dialog open={previewDialog} onOpenChange={setPreviewDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto custom-scroll">
+          <DialogHeader>
+            <div className="flex items-center justify-between pr-6">
+              <DialogTitle className="flex items-center gap-2 text-primary text-lg">
+                <Eye className="w-5 h-5" /> Student View Preview / معاينة الطالب (Read-Only)
+              </DialogTitle>
+              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">Teacher Preview Mode</Badge>
+            </div>
+          </DialogHeader>
+
+          {previewLoading ? (
+            <div className="py-12 text-center text-muted-foreground">Loading preview...</div>
+          ) : !previewData || previewData.questions.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground">No questions found in this quiz yet.</div>
+          ) : (
+            <div className="space-y-6 py-2">
+              <div className="bg-secondary/50 border rounded-xl p-4">
+                <h3 className="font-bold text-lg">{previewData.title}</h3>
+                <div className="flex gap-4 text-xs text-muted-foreground mt-2 font-mono">
+                  <span>Duration: {previewData.durationMinutes} min</span>
+                  <span>Questions: {previewData.questions.length}</span>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {previewData.questions.map((q, idx) => (
+                  <Card key={q.id || idx} className="p-5 border shadow-sm">
+                    <div className="flex items-center justify-between mb-3 border-b pb-2">
+                      <span className="text-xs font-semibold text-muted-foreground">Question {idx + 1} of {previewData.questions.length}</span>
+                      <span className="text-xs bg-secondary px-2 py-0.5 rounded font-mono">{q.points} pt{q.points > 1 ? "s" : ""}</span>
+                    </div>
+
+                    {q.passage && (
+                      <div className="mb-4 p-3.5 bg-primary/5 border border-primary/20 rounded-xl text-sm leading-relaxed whitespace-pre-wrap">
+                        <span className="text-xs font-bold text-primary block mb-1">قطعة القراءة / Passage:</span>
+                        {q.passage}
+                      </div>
+                    )}
+
+                    <h4 className="font-semibold text-base mb-3">{q.text}</h4>
+
+                    {q.imageUrl && (
+                      <div className="my-3 rounded-xl overflow-hidden border bg-black/5 p-2 text-center">
+                        <img src={q.imageUrl} alt="Question Diagram" className="w-full max-h-[450px] object-contain rounded-lg shadow-sm mx-auto" />
+                      </div>
+                    )}
+
+                    <div className="mt-4">
+                      {q.type === "true_false" ? (
+                        <div className="flex gap-3">
+                          <button disabled className="flex-1 py-3 rounded-xl border-2 font-bold text-sm border-green-600 bg-green-50 text-green-700 opacity-80 cursor-not-allowed">
+                            صح (True)
+                          </button>
+                          <button disabled className="flex-1 py-3 rounded-xl border-2 font-bold text-sm border-red-600 bg-red-50 text-red-700 opacity-80 cursor-not-allowed">
+                            خطأ (False)
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {q.choices.map((choiceText, cIdx) => (
+                            <div key={cIdx} className="p-3 border rounded-xl flex items-center gap-3 bg-background opacity-90">
+                              <span className="w-6 h-6 rounded-full border flex items-center justify-center font-mono text-xs font-bold text-muted-foreground">
+                                {String.fromCharCode(65 + cIdx)}
+                              </span>
+                              <span className="text-sm font-medium">{choiceText}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewDialog(false)}>Close Preview</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

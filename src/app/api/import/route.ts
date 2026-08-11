@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import sharp from 'sharp';
+import JSZip from 'jszip';
 import { db } from '@/lib/db';
 import { getUserFromRequest, requireAdmin } from '@/lib/auth';
 import { writeFile, mkdir } from 'fs/promises';
@@ -17,20 +18,30 @@ type ParsedQuestion = {
 };
 
 async function saveImageToDisk(data: Buffer, ext: string): Promise<string> {
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-  await mkdir(uploadDir, { recursive: true });
-  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.webp`;
+  let compressed: Buffer;
+  let finalExt = 'webp';
+
   try {
-    const compressed = await sharp(data)
+    compressed = await sharp(data)
       .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
       .webp({ quality: 80 })
       .toBuffer();
+  } catch {
+    compressed = data;
+    finalExt = ext || 'jpg';
+  }
+
+  const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${finalExt}`;
+
+  try {
+    await mkdir(uploadDir, { recursive: true });
     await writeFile(path.join(uploadDir, filename), compressed);
     return `/uploads/${filename}`;
   } catch {
-    const fallbackFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext || 'jpg'}`;
-    await writeFile(path.join(uploadDir, fallbackFilename), data);
-    return `/uploads/${fallbackFilename}`;
+    // EROFS Read-only filesystem fallback (e.g. Vercel Serverless)
+    const mime = finalExt === 'webp' ? 'image/webp' : 'image/jpeg';
+    return `data:${mime};base64,${compressed.toString('base64')}`;
   }
 }
 
@@ -135,6 +146,27 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
   const questions: ParsedQuestion[] = [];
 
+  // Extract embedded images from Excel ZIP archive (xl/media/...)
+  const extractedImages: string[] = [];
+  try {
+    const zip = await JSZip.loadAsync(buffer);
+    const mediaFiles = Object.keys(zip.files).filter(filename => /^xl\/media\//i.test(filename));
+    mediaFiles.sort(); // keep deterministic image order
+    for (const mediaPath of mediaFiles) {
+      const zipFile = zip.files[mediaPath];
+      if (zipFile && !zipFile.dir) {
+        const fileData = await zipFile.async('nodebuffer');
+        const ext = mediaPath.split('.').pop() || 'png';
+        const savedUrl = await saveImageToDisk(fileData, ext);
+        extractedImages.push(savedUrl);
+      }
+    }
+  } catch (zipError) {
+    console.warn('Excel zip media extraction notice:', zipError);
+  }
+
+  let extractedImageIndex = 0;
+
   for (const row of rows) {
     const text = String(row['question'] || row['text'] || '').trim();
     if (!text) continue;
@@ -149,19 +181,28 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
     ).trim();
 
     if (rawImg) {
-      if (rawImg.startsWith('http://') || rawImg.startsWith('https://') || rawImg.startsWith('/uploads/')) {
-        imageUrl = rawImg;
-      } else if (rawImg.startsWith('data:image')) {
-        const base64Data = rawImg.split(',')[1];
-        if (base64Data) {
-          const ext = rawImg.includes('png') ? 'png' : 'jpg';
-          imageUrl = await saveImageToDisk(Buffer.from(base64Data, 'base64'), ext);
+      if (rawImg.startsWith('http://') || rawImg.startsWith('https://') || rawImg.startsWith('/uploads/') || rawImg.startsWith('data:image')) {
+        if (rawImg.startsWith('data:image')) {
+          const base64Data = rawImg.split(',')[1];
+          if (base64Data) {
+            const ext = rawImg.includes('png') ? 'png' : 'jpg';
+            imageUrl = await saveImageToDisk(Buffer.from(base64Data, 'base64'), ext);
+          } else {
+            imageUrl = rawImg;
+          }
+        } else {
+          imageUrl = rawImg;
         }
       } else if (rawImg.length > 50) {
         try {
           imageUrl = await saveImageToDisk(Buffer.from(rawImg, 'base64'), 'jpg');
         } catch { /* silent */ }
       }
+    }
+
+    // Fall back to extracted Excel embedded shape/picture if available
+    if (!imageUrl && extractedImageIndex < extractedImages.length) {
+      imageUrl = extractedImages[extractedImageIndex++];
     }
 
     const choices: { text: string; isCorrect: boolean }[] = [];

@@ -28,9 +28,18 @@ export async function POST(request: NextRequest) {
 
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
     const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-    await mkdir(uploadDir, { recursive: true });
-    await writeFile(path.join(uploadDir, filename), outputBuffer);
-    return NextResponse.json({ url: `/uploads/${filename}`, filename });
+
+    try {
+      await mkdir(uploadDir, { recursive: true });
+      await writeFile(path.join(uploadDir, filename), outputBuffer);
+      return NextResponse.json({ url: `/uploads/${filename}`, filename });
+    } catch {
+      // Fallback for Vercel Read-Only File System (EROFS)
+      const base64Data = outputBuffer.toString('base64');
+      const mimeType = ext === '.webp' ? 'image/webp' : 'image/jpeg';
+      const dataUri = `data:${mimeType};base64,${base64Data}`;
+      return NextResponse.json({ url: dataUri, filename });
+    }
   } catch (error) {
     console.error('Upload error:', error);
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
