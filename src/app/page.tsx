@@ -1255,16 +1255,36 @@ export default function QuizBank() {
                         <Download className="w-4 h-4" /> Download Example
                       </Button>
                     </div>
-                    <div className="mt-3 p-3 bg-background rounded-lg text-xs text-muted-foreground space-y-1.5 border">
-                      <p className="font-semibold text-foreground mb-1">Expected Excel Columns & Format:</p>
-                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">passage</code> — (optional) Reading passage or case study text</p>
-                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">type</code> — (optional) <code className="font-bold">mcq</code> or <code className="font-bold">true_false</code> (defaults to mcq)</p>
-                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">question</code> — The question text</p>
-                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">choice1</code> .. <code className="bg-secondary px-1 rounded text-primary font-mono">choice4</code> — Answer choices</p>
-                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">correct</code> — Correct answer letter (A, B, C, D) or 1..4</p>
-                      <p><code className="bg-secondary px-1 rounded text-primary font-mono">image</code> — (optional) Image URL or embedded image</p>
-                      <div className="pt-2 border-t text-[11px] text-muted-foreground">
-                        <span className="font-bold text-foreground">Word (.docx) Support:</span> Paste images directly into Word! Add passages by starting a paragraph with <code className="bg-secondary px-1 rounded">[Passage: ...]</code> or <code className="bg-secondary px-1 rounded">[قطعة: ...]</code>.
+                    <div className="mt-3 p-3 bg-background rounded-lg text-xs text-muted-foreground space-y-2 border">
+                      <p className="font-semibold text-foreground text-sm flex items-center gap-1.5 text-primary">
+                        📝 دليل رفع الكويزات والأسئلة (Word & Excel):
+                      </p>
+
+                      <div className="p-2.5 bg-primary/5 border border-primary/20 rounded-md space-y-1">
+                        <p className="font-bold text-foreground text-xs text-primary flex items-center gap-1">
+                          📄 1. ملف وورد Word (.docx) — الخيار الأسهل للصور المباشرة:
+                        </p>
+                        <p className="text-muted-foreground">
+                          • انسخ وألصق الصور من جهازك مباشرة داخل ملف الوورد تحت السؤال أو قبله!
+                        </p>
+                        <p className="text-muted-foreground">
+                          • لإضافة قطعة قراءة: ابدأ الفقرة بـ <code className="bg-primary/10 text-primary px-1 rounded font-bold">[قطعة: ...]</code> أو <code className="bg-primary/10 text-primary px-1 rounded font-bold">[Passage: ...]</code>.
+                        </p>
+                        <p className="text-muted-foreground">
+                          • اكتب السؤال متبوعاً بالخيارات <code className="font-bold text-foreground">A) ... B) ... C) ... D) ...</code> أو أسئلة الصح والخطأ <code className="font-bold text-foreground">(T/F)</code>.
+                        </p>
+                      </div>
+
+                      <div className="p-2.5 bg-secondary/50 border rounded-md space-y-1">
+                        <p className="font-bold text-foreground text-xs flex items-center gap-1">
+                          📊 2. ملف إكسيل Excel (.xlsx):
+                        </p>
+                        <p className="text-muted-foreground">
+                          • أسماء الأعمدة: <code className="bg-secondary px-1 rounded text-primary font-mono">question</code>, <code className="bg-secondary px-1 rounded text-primary font-mono">choice1</code> .. <code className="bg-secondary px-1 rounded text-primary font-mono">choice4</code>, <code className="bg-secondary px-1 rounded text-primary font-mono">correct</code>, <code className="bg-secondary px-1 rounded text-primary font-mono">passage</code>, <code className="bg-secondary px-1 rounded text-primary font-mono">image</code>.
+                        </p>
+                        <p className="text-muted-foreground">
+                          • للصور: اكتب رابط الصورة أو اسمها أو كودها في عمود <code className="font-mono text-primary">image</code> أمام كل سؤال يحتوي على صورة.
+                        </p>
                       </div>
                     </div>
                   </Card>

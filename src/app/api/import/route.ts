@@ -276,7 +276,7 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
       }
     }
 
-    // 2. Drawing XML precise row anchor mapping
+    // 2. Drawing XML precise row anchor mapping (Excel 0-indexed row vs 1-indexed data row)
     if (!imageUrl) {
       const targetImage = rowToImageMap[rIdx + 1] || rowToImageMap[rIdx + 2] || rowToImageMap[rIdx];
       if (targetImage) {
@@ -284,14 +284,13 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
       }
     }
 
-    // 3. Smart Tail Offset Alignment (if images start at Question 31, e.g. 50 questions & 20 images)
-    if (!imageUrl && totalImages > 0) {
-      if (imageOffset > 0) {
-        if (currentQIdx >= imageOffset && (currentQIdx - imageOffset) < totalImages) {
-          imageUrl = fallbackImages[currentQIdx - imageOffset];
-        }
-      } else if (currentQIdx < totalImages) {
-        imageUrl = fallbackImages[currentQIdx];
+    // 3. Fallback to image list ONLY if the image column has an indicator (non-empty rawImg, e.g. 'yes', '1', 'img1', etc.)
+    if (!imageUrl && rawImg && fallbackImages.length > 0) {
+      // Pick matching image index if rawImg contains a number, else pick corresponding image
+      const numMatch = rawImg.match(/\d+/);
+      const imgIdx = numMatch ? Math.max(0, parseInt(numMatch[0], 10) - 1) : currentQIdx;
+      if (imgIdx < fallbackImages.length) {
+        imageUrl = fallbackImages[imgIdx];
       }
     }
 
