@@ -5,9 +5,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen, Clock, CheckCircle2, XCircle, LogIn, LogOut, UserPlus,
   LayoutDashboard, Shield, Plus, Trash2, Edit3, Upload, FileText,
-  ChevronLeft, ChevronRight, ArrowRight, BarChart3, Timer,
-  AlertTriangle, Eye, Play, Save, Send, Menu, X, Home,
-  FolderOpen, HelpCircle, Award, Users, Settings
+  ChevronLeft, BarChart3, Timer,
+  AlertTriangle, Eye, Play, Save, Send, Menu, X,
+  FolderOpen, HelpCircle, Award, Users, Download
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,7 +27,7 @@ type Subject = { id: string; name: string; description: string | null; quizCount
 type Quiz = { id: string; title: string; description: string | null; durationMinutes: number; questionCount: number; attemptCount: number; subjectName: string; order: number; status: string | null };
 type QuizQuestion = { id: string; text: string; imageUrl: string | null; points: number; choices: string[] };
 type ReviewQuestion = { id: string; text: string; imageUrl: string | null; points: number; choices: { id: string; text: string; isCorrect: boolean }[]; correct: number; picked: number | null };
-type AttemptResult = { id: string; score: number; totalPoints: number; startedAt: string; submittedAt: string; quiz: { id: string; title: string; subjectName: string }; percent: number };
+type AttemptResult = { id: string; score: number; totalPoints: number; startedAt: string; submittedAt: string; quiz: { id: string; title: string; subjectName: string }; percent: number; userName?: string | null };
 type ImportQuestion = { text: string; imageUrl: string | null; choices: { text: string; isCorrect: boolean }[] };
 
 type View = "home" | "subject" | "quiz" | "dashboard" | "admin" | "auth";
@@ -108,6 +108,10 @@ export default function QuizBank() {
       api("/api/auth/me").then((data) => {
         if (data.user) {
           setUser(data.user);
+          // Admin goes directly to Teacher Panel
+          if (data.user.role === "admin") {
+            setView("admin");
+          }
         } else {
           localStorage.removeItem("quiz_token");
         }
@@ -126,10 +130,17 @@ export default function QuizBank() {
 
   useEffect(() => { loadSubjects(); }, [loadSubjects]);
 
-  // Load dashboard attempts
-  const loadDashboard = useCallback(async () => {
-    if (!user) return;
-    const data = await api(`/api/attempts?type=dashboard`);
+  // Load dashboard attempts (student)
+  const loadStudentDashboard = useCallback(async () => {
+    if (!user || user.role !== "student") return;
+    const data = await api("/api/attempts?type=dashboard");
+    if (data.attempts) setAttempts(data.attempts);
+  }, [user]);
+
+  // Load admin results (all students)
+  const loadAdminResults = useCallback(async () => {
+    if (!user || user.role !== "admin") return;
+    const data = await api("/api/attempts?type=admin-results");
     if (data.attempts) setAttempts(data.attempts);
   }, [user]);
 
@@ -178,10 +189,14 @@ export default function QuizBank() {
     if (data.user) {
       localStorage.setItem("quiz_token", data.token);
       setUser(data.user);
-      setView("home");
-      toast.success(data.user.role === "admin" ? "Logged in as Teacher" : "Logged in successfully");
       setAuthEmail(""); setAuthPassword(""); setAuthName("");
-      if (data.user.role === "admin") { setView("admin"); }
+      if (data.user.role === "admin") {
+        setView("admin");
+        toast.success("Logged in as Teacher");
+      } else {
+        setView("home");
+        toast.success("Logged in successfully");
+      }
     } else {
       toast.error(data.error || "Something went wrong");
     }
@@ -280,7 +295,7 @@ export default function QuizBank() {
 
   // Admin: Delete subject
   const deleteSubject = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this subject and all its quizzes?")) return;
+    if (!confirm("Are you sure you want to delete this subject and all its quizzes, questions, and attempts?")) return;
     const data = await api(`/api/subjects?id=${id}`, { method: "DELETE" });
     if (data.error) { toast.error(data.error); return; }
     toast.success("Subject deleted");
@@ -303,10 +318,11 @@ export default function QuizBank() {
     loadSubjects();
   };
 
-  // Admin: Delete quiz
+  // Admin: Delete quiz (FIXED: check for errors)
   const deleteQuiz = async (id: string) => {
-    if (!confirm("Delete this quiz?")) return;
-    await api(`/api/quizzes?id=${id}`, { method: "DELETE" });
+    if (!confirm("Delete this quiz and all its questions, attempts, and results?")) return;
+    const data = await api(`/api/quizzes?id=${id}`, { method: "DELETE" });
+    if (data.error) { toast.error(data.error); return; }
     toast.success("Quiz deleted");
     loadSubjects();
   };
@@ -353,6 +369,21 @@ export default function QuizBank() {
     setImportLoading(false);
   };
 
+  // Download import example
+  const downloadExample = async () => {
+    try {
+      const data = await api("/api/import?action=example");
+      if (data.url) {
+        window.open(data.url, "_blank");
+        toast.success("Example file downloaded");
+      } else {
+        toast.error("Failed to generate example");
+      }
+    } catch {
+      toast.error("Failed to download example");
+    }
+  };
+
   // Navigation helpers
   const goHome = () => { setView("home"); setCurrentSubject(null); setMobileMenuOpen(false); };
   const goToSubject = (subject: Subject) => {
@@ -361,8 +392,13 @@ export default function QuizBank() {
     setView("subject");
     setMobileMenuOpen(false);
   };
-  const goToDashboard = () => {
-    loadDashboard();
+  const goToStudentDashboard = () => {
+    loadStudentDashboard();
+    setView("dashboard");
+    setMobileMenuOpen(false);
+  };
+  const goToAdminResults = () => {
+    loadAdminResults();
     setView("dashboard");
     setMobileMenuOpen(false);
   };
@@ -389,8 +425,8 @@ export default function QuizBank() {
       <header className="sticky top-0 z-50 bg-card border-b border-border shadow-sm">
         <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button onClick={() => { if (view !== "home") { goHome(); } else { setMobileMenuOpen(!mobileMenuOpen); } }} className="p-2 rounded-lg hover:bg-secondary transition-colors">
-              {view !== "home" ? <ChevronLeft className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            <button onClick={() => { if (view !== "home" && !(view === "admin" && user?.role === "admin")) { goHome(); } else { setMobileMenuOpen(!mobileMenuOpen); } }} className="p-2 rounded-lg hover:bg-secondary transition-colors">
+              {view !== "home" && !(view === "admin" && user?.role === "admin") ? <ChevronLeft className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
             <button onClick={goHome} className="font-bold text-lg hover:opacity-80 transition-opacity">
               Dr. Rahma <span className="text-primary">·</span> Quiz Bank
@@ -400,14 +436,14 @@ export default function QuizBank() {
             {user ? (
               <>
                 {user.role === "student" && (
-                  <Button variant="ghost" size="sm" onClick={goToDashboard} className="gap-1.5 text-sm">
+                  <Button variant="ghost" size="sm" onClick={goToStudentDashboard} className="gap-1.5 text-sm">
                     <LayoutDashboard className="w-4 h-4" />
                     <span className="hidden sm:inline">My Results</span>
                   </Button>
                 )}
                 {user.role === "admin" && (
                   <>
-                    <Button variant="ghost" size="sm" onClick={goToDashboard} className="gap-1.5 text-sm">
+                    <Button variant="ghost" size="sm" onClick={goToAdminResults} className="gap-1.5 text-sm">
                       <BarChart3 className="w-4 h-4" />
                       <span className="hidden sm:inline">Results</span>
                     </Button>
@@ -441,7 +477,7 @@ export default function QuizBank() {
 
       {/* ===== Mobile Menu ===== */}
       <AnimatePresence>
-        {mobileMenuOpen && view === "home" && (
+        {mobileMenuOpen && (view === "home" || (view === "admin" && user?.role === "admin")) && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -450,13 +486,13 @@ export default function QuizBank() {
           >
             <div className="flex flex-col gap-2">
               {user?.role === "student" && (
-                <Button variant="ghost" className="justify-start gap-2" onClick={goToDashboard}>
+                <Button variant="ghost" className="justify-start gap-2" onClick={goToStudentDashboard}>
                   <LayoutDashboard className="w-4 h-4" /> My Results
                 </Button>
               )}
               {user?.role === "admin" && (
                 <>
-                  <Button variant="ghost" className="justify-start gap-2" onClick={goToDashboard}>
+                  <Button variant="ghost" className="justify-start gap-2" onClick={goToAdminResults}>
                     <BarChart3 className="w-4 h-4" /> Results
                   </Button>
                   <Button variant="ghost" className="justify-start gap-2" onClick={goToAdmin}>
@@ -473,7 +509,7 @@ export default function QuizBank() {
       <main className="flex-1">
         <AnimatePresence mode="wait">
 
-          {/* ========== HOME ========== */}
+          {/* ========== HOME (Student only, or unauthenticated) ========== */}
           {view === "home" && !user && (
             <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-lg mx-auto px-4 py-16">
               <div className="text-center mb-10">
@@ -501,14 +537,15 @@ export default function QuizBank() {
             </motion.div>
           )}
 
-          {view === "home" && user && (
-            <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+          {/* ========== HOME (Student logged in - sees subjects) ========== */}
+          {view === "home" && user && user.role === "student" && (
+            <motion.div key="home-student" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
               <div className="mb-6">
                 <h1 className="text-2xl font-bold mb-1">Subjects</h1>
                 <p className="text-muted-foreground text-sm">Pick a subject to see available quizzes</p>
               </div>
 
-              {totalPending > 0 && user?.role === "student" && (
+              {totalPending > 0 && (
                 <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
                   className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2 text-sm">
                   <AlertTriangle className="w-4 h-4 text-primary" />
@@ -538,7 +575,7 @@ export default function QuizBank() {
                       )}
                       <div className="flex gap-4 text-sm">
                         <div className="font-mono text-primary font-semibold">{subject.quizCount}<span className="block text-xs text-muted-foreground font-sans font-normal">quiz{subject.quizCount === 1 ? "" : "zes"}</span></div>
-                        {user?.role === "student" && subject.pendingQuizzes > 0 && (
+                        {subject.pendingQuizzes > 0 && (
                           <div className="font-mono text-destructive font-semibold">{subject.pendingQuizzes}<span className="block text-xs text-muted-foreground font-sans font-normal">remaining</span></div>
                         )}
                       </div>
@@ -549,8 +586,8 @@ export default function QuizBank() {
             </motion.div>
           )}
 
-          {/* ========== SUBJECT ========== */}
-          {view === "subject" && currentSubject && (
+          {/* ========== SUBJECT (Student only) ========== */}
+          {view === "subject" && currentSubject && user?.role === "student" && (
             <motion.div key="subject" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
               <div className="mb-6">
                 <h1 className="text-2xl font-bold mb-1">{currentSubject.name}</h1>
@@ -592,7 +629,7 @@ export default function QuizBank() {
             </motion.div>
           )}
 
-          {/* ========== QUIZ ========== */}
+          {/* ========== QUIZ (running or review) ========== */}
           {view === "quiz" && (
             <motion.div key="quiz" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-4xl mx-auto px-4 py-6">
               {/* Quiz Header */}
@@ -723,7 +760,7 @@ export default function QuizBank() {
             </motion.div>
           )}
 
-          {/* ========== DASHBOARD ========== */}
+          {/* ========== STUDENT DASHBOARD ========== */}
           {view === "dashboard" && user?.role === "student" && (
             <motion.div key="dashboard" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
               <div className="mb-6">
@@ -762,6 +799,48 @@ export default function QuizBank() {
                       <Button variant="ghost" size="sm" onClick={() => showReview(attempt.id)} className="shrink-0 gap-1">
                         <Eye className="w-4 h-4" /> Review
                       </Button>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {/* ========== ADMIN RESULTS (All Students) ========== */}
+          {view === "dashboard" && user?.role === "admin" && (
+            <motion.div key="admin-results" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+              <div className="mb-6">
+                <h1 className="text-2xl font-bold mb-1">All Student Results</h1>
+                <p className="text-muted-foreground text-sm">View all submitted quiz attempts from students</p>
+              </div>
+
+              {attempts.length === 0 ? (
+                <Card className="p-6 text-center">
+                  <BarChart3 className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+                  <p className="text-muted-foreground">No submitted quizzes yet. Students haven't taken any quizzes.</p>
+                </Card>
+              ) : (
+                <div className="space-y-3">
+                  {attempts.map((attempt, i) => (
+                    <motion.div key={attempt.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
+                      className="bg-card border border-border rounded-xl p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-sm truncate">{attempt.quiz.title}</h3>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {attempt.quiz.subjectName} • {new Date(attempt.submittedAt).toLocaleDateString()}
+                            {attempt.userName && <span className="ml-2 font-medium text-foreground">• {attempt.userName}</span>}
+                          </p>
+                        </div>
+                        <div className="text-center shrink-0">
+                          <div className={`font-mono text-xl font-bold ${attempt.percent >= 60 ? "text-green-600" : "text-destructive"}`}>{attempt.percent}%</div>
+                          <div className="text-xs text-muted-foreground">{attempt.score}/{attempt.totalPoints}</div>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => showReview(attempt.id)} className="shrink-0 gap-1">
+                          <Eye className="w-4 h-4" /> Review
+                        </Button>
+                      </div>
                     </motion.div>
                   ))}
                 </div>
@@ -829,7 +908,7 @@ export default function QuizBank() {
             </motion.div>
           )}
 
-          {/* ========== ADMIN ========== */}
+          {/* ========== ADMIN (Teacher Panel) ========== */}
           {view === "admin" && user?.role === "admin" && (
             <motion.div key="admin" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
               <div className="mb-6">
@@ -913,6 +992,30 @@ export default function QuizBank() {
                     <h2 className="font-semibold mb-1">Import Questions</h2>
                     <p className="text-sm text-muted-foreground">Upload a Word (.docx) or Excel (.xlsx) file to auto-import questions</p>
                   </div>
+
+                  {/* Download Example Button */}
+                  <Card className="p-4 mb-4 bg-primary/5 border-primary/20">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Download className="w-5 h-5 text-primary" />
+                        <div>
+                          <p className="text-sm font-semibold">Need an example template?</p>
+                          <p className="text-xs text-muted-foreground">Download a sample Excel file showing the expected format</p>
+                        </div>
+                      </div>
+                      <Button size="sm" variant="outline" onClick={downloadExample} className="gap-1.5 shrink-0">
+                        <Download className="w-4 h-4" /> Download Example
+                      </Button>
+                    </div>
+                    <div className="mt-3 p-3 bg-background rounded-lg text-xs text-muted-foreground space-y-1">
+                      <p className="font-semibold text-foreground mb-1">Expected Excel format:</p>
+                      <p><code className="bg-secondary px-1 rounded">question</code> — The question text</p>
+                      <p><code className="bg-secondary px-1 rounded">choice1</code> to <code className="bg-secondary px-1 rounded">choice4</code> — Answer choices</p>
+                      <p><code className="bg-secondary px-1 rounded">correct</code> — Correct answer letter (A, B, C, D)</p>
+                      <p><code className="bg-secondary px-1 rounded">image</code> — (optional) Image URL</p>
+                    </div>
+                  </Card>
+
                   <Card className="p-5">
                     <div className="space-y-4">
                       <div>

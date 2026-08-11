@@ -1,0 +1,1024 @@
+     1→"use client";
+     2→
+     3→import { useState, useEffect, useCallback, useRef } from "react";
+     4→import { motion, AnimatePresence } from "framer-motion";
+     5→import {
+     6→  BookOpen, Clock, CheckCircle2, XCircle, LogIn, LogOut, UserPlus,
+     7→  LayoutDashboard, Shield, Plus, Trash2, Edit3, Upload, FileText,
+     8→  ChevronLeft, ChevronRight, ArrowRight, BarChart3, Timer,
+     9→  AlertTriangle, Eye, Play, Save, Send, Menu, X, Home,
+    10→  FolderOpen, HelpCircle, Award, Users, Settings
+    11→} from "lucide-react";
+    12→import { Button } from "@/components/ui/button";
+    13→import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+    14→import { Input } from "@/components/ui/input";
+    15→import { Label } from "@/components/ui/label";
+    16→import { Badge } from "@/components/ui/badge";
+    17→import { Progress } from "@/components/ui/progress";
+    18→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    19→import {
+    20→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+    21→} from "@/components/ui/dialog";
+    22→import { toast } from "sonner";
+    23→
+    24→// ============ Types ============
+    25→type User = { id: string; email: string; name: string | null; role: string };
+    26→type Subject = { id: string; name: string; description: string | null; quizCount: number; pendingQuizzes: number; quizzes: Quiz[] };
+    27→type Quiz = { id: string; title: string; description: string | null; durationMinutes: number; questionCount: number; attemptCount: number; subjectName: string; order: number; status: string | null };
+    28→type QuizQuestion = { id: string; text: string; imageUrl: string | null; points: number; choices: string[] };
+    29→type ReviewQuestion = { id: string; text: string; imageUrl: string | null; points: number; choices: { id: string; text: string; isCorrect: boolean }[]; correct: number; picked: number | null };
+    30→type AttemptResult = { id: string; score: number; totalPoints: number; startedAt: string; submittedAt: string; quiz: { id: string; title: string; subjectName: string }; percent: number };
+    31→type ImportQuestion = { text: string; imageUrl: string | null; choices: { text: string; isCorrect: boolean }[] };
+    32→
+    33→type View = "home" | "subject" | "quiz" | "dashboard" | "admin" | "auth";
+    34→
+    35→// ============ API Helper ============
+    36→async function api(path: string, options?: RequestInit) {
+    37→  const token = typeof window !== "undefined" ? localStorage.getItem("quiz_token") : null;
+    38→  const res = await fetch(path, {
+    39→    ...options,
+    40→    headers: {
+    41→      ...options?.headers,
+    42→      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    43→      ...(options?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+    44→    },
+    45→  });
+    46→  return res.json();
+    47→}
+    48→
+    49→// ============ Main Component ============
+    50→export default function QuizBank() {
+    51→  const [user, setUser] = useState<User | null>(null);
+    52→  const [view, setView] = useState<View>("home");
+    53→  const [loading, setLoading] = useState(true);
+    54→  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    55→
+    56→  // Data states
+    57→  const [subjects, setSubjects] = useState<Subject[]>([]);
+    58→  const [currentSubject, setCurrentSubject] = useState<Subject | null>(null);
+    59→  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+    60→  const [attempts, setAttempts] = useState<AttemptResult[]>([]);
+    61→
+    62→  // Quiz running state
+    63→  const [quizData, setQuizData] = useState<{ quiz: { id: string; title: string; description: string | null; durationMinutes: number }; questions: QuizQuestion[] } | null>(null);
+    64→  const [quizAnswers, setQuizAnswers] = useState<(number | null)[]>([]);
+    65→  const [attemptId, setAttemptId] = useState<string | null>(null);
+    66→  const [quizStarted, setQuizStarted] = useState(false);
+    67→  const [quizSubmitted, setQuizSubmitted] = useState(false);
+    68→  const [quizStartTime, setQuizStartTime] = useState(0);
+    69→  const [serverTimeOffset, setServerTimeOffset] = useState(0);
+    70→  const [timeRemaining, setTimeRemaining] = useState(0);
+    71→  const [reviewData, setReviewData] = useState<{ score: number; totalPoints: number; percent: number; questions: ReviewQuestion[] } | null>(null);
+    72→
+    73→  // Auth form state
+    74→  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+    75→  const [authRole, setAuthRole] = useState<"student" | "teacher">("student");
+    76→  const [authEmail, setAuthEmail] = useState("");
+    77→  const [authPassword, setAuthPassword] = useState("");
+    78→  const [authName, setAuthName] = useState("");
+    79→  const [authLoading, setAuthLoading] = useState(false);
+    80→
+    81→  // Admin states
+    82→  const [adminTab, setAdminTab] = useState("subjects");
+    83→  const [subjectDialog, setSubjectDialog] = useState(false);
+    84→  const [editSubject, setEditSubject] = useState<Subject | null>(null);
+    85→  const [subjectName, setSubjectName] = useState("");
+    86→  const [subjectDesc, setSubjectDesc] = useState("");
+    87→  const [quizDialog, setQuizDialog] = useState(false);
+    88→  const [editQuiz, setEditQuiz] = useState<Quiz | null>(null);
+    89→  const [quizTitle, setQuizTitle] = useState("");
+    90→  const [quizDesc, setQuizDesc] = useState("");
+    91→  const [quizDuration, setQuizDuration] = useState("40");
+    92→  const [quizSubjectId, setQuizSubjectId] = useState("");
+    93→  const [importDialog, setImportDialog] = useState(false);
+    94→  const [importQuizId, setImportQuizId] = useState("");
+    95→  const [importPreview, setImportPreview] = useState<ImportQuestion[]>([]);
+    96→  const [importLoading, setImportLoading] = useState(false);
+    97→  const importFileRef = useRef<HTMLInputElement>(null);
+    98→  const confirmFileRef = useRef<HTMLInputElement>(null);
+    99→
+   100→  // Timer
+   101→  const timerRef = useRef<NodeJS.Timeout | null>(null);
+   102→  const submitQuizRef = useRef<(auto: boolean) => Promise<void>>();
+   103→
+   104→  // Load user on mount
+   105→  useEffect(() => {
+   106→    const token = localStorage.getItem("quiz_token");
+   107→    if (token) {
+   108→      api("/api/auth/me").then((data) => {
+   109→        if (data.user) {
+   110→          setUser(data.user);
+   111→        } else {
+   112→          localStorage.removeItem("quiz_token");
+   113→        }
+   114→        setLoading(false);
+   115→      }).catch(() => setLoading(false));
+   116→    } else {
+   117→      setLoading(false);
+   118→    }
+   119→  }, []);
+   120→
+   121→  // Load subjects
+   122→  const loadSubjects = useCallback(async () => {
+   123→    const data = await api("/api/subjects");
+   124→    if (data.subjects) setSubjects(data.subjects);
+   125→  }, []);
+   126→
+   127→  useEffect(() => { loadSubjects(); }, [loadSubjects]);
+   128→
+   129→  // Load dashboard attempts
+   130→  const loadDashboard = useCallback(async () => {
+   131→    if (!user) return;
+   132→    const data = await api(`/api/attempts?type=dashboard`);
+   133→    if (data.attempts) setAttempts(data.attempts);
+   134→  }, [user]);
+   135→
+   136→  // Load quizzes for a subject
+   137→  const loadSubjectQuizzes = useCallback(async (subjectId: string) => {
+   138→    const data = await api(`/api/quizzes?subjectId=${subjectId}`);
+   139→    if (data.quizzes) {
+   140→      setQuizzes(data.quizzes);
+   141→      const sub = subjects.find(s => s.id === subjectId);
+   142→      if (sub) setCurrentSubject({ ...sub, quizzes: data.quizzes });
+   143→    }
+   144→  }, [subjects]);
+   145→
+   146→  // Timer for quiz
+   147→  useEffect(() => {
+   148→    if (!quizStarted || quizSubmitted) return;
+   149→    timerRef.current = setInterval(() => {
+   150→      const now = Date.now() + serverTimeOffset;
+   151→      const durationMs = (quizData?.quiz.durationMinutes || 40) * 60 * 1000;
+   152→      const elapsed = now - quizStartTime;
+   153→      const remaining = Math.max(0, durationMs - elapsed);
+   154→      setTimeRemaining(remaining);
+   155→      if (remaining <= 0) {
+   156→        submitQuizRef.current?.(true);
+   157→      }
+   158→    }, 250);
+   159→    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+   160→  }, [quizStarted, quizSubmitted, quizStartTime, serverTimeOffset, quizData]);
+   161→
+   162→  // Format time
+   163→  const fmtTime = (ms: number) => {
+   164→    const sec = Math.max(0, Math.round(ms / 1000));
+   165→    const m = Math.floor(sec / 60);
+   166→    const s = sec % 60;
+   167→    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+   168→  };
+   169→
+   170→  // Auth handlers
+   171→  const handleAuth = async () => {
+   172→    setAuthLoading(true);
+   173→    const endpoint = authMode === "login" ? "/api/auth/sign-in" : "/api/auth/sign-up";
+   174→    const body = authMode === "login"
+   175→      ? { email: authEmail, password: authPassword }
+   176→      : { email: authEmail, password: authPassword, name: authName };
+   177→    const data = await api(endpoint, { method: "POST", body: JSON.stringify(body) });
+   178→    if (data.user) {
+   179→      localStorage.setItem("quiz_token", data.token);
+   180→      setUser(data.user);
+   181→      setView("home");
+   182→      toast.success(data.user.role === "admin" ? "Logged in as Teacher" : "Logged in successfully");
+   183→      setAuthEmail(""); setAuthPassword(""); setAuthName("");
+   184→      if (data.user.role === "admin") { setView("admin"); }
+   185→    } else {
+   186→      toast.error(data.error || "Something went wrong");
+   187→    }
+   188→    setAuthLoading(false);
+   189→  };
+   190→
+   191→  const logout = () => {
+   192→    localStorage.removeItem("quiz_token");
+   193→    setUser(null);
+   194→    setView("home");
+   195→    setMobileMenuOpen(false);
+   196→    toast.success("Logged out");
+   197→  };
+   198→
+   199→  // Show review (declared first for hoisting)
+   200→  const showReview = async (aid: string) => {
+   201→    setView("quiz");
+   202→    const data = await api(`/api/attempts?type=review&attemptId=${aid}`);
+   203→    if (data.questions) {
+   204→      setReviewData(data);
+   205→      setQuizSubmitted(true);
+   206→      setQuizStarted(false);
+   207→    }
+   208→  };
+   209→
+   210→  // Submit quiz
+   211→  const submitQuiz = async (auto = false) => {
+   212→    submitQuizRef.current = submitQuiz;
+   213→    if (quizSubmitted || !attemptId) return;
+   214→    if (timerRef.current) clearInterval(timerRef.current);
+   215→    const unanswered = quizAnswers.filter(a => a === null || a === undefined).length;
+   216→    if (!auto && unanswered > 0) {
+   217→      if (!confirm(`You still have ${unanswered} unanswered question${unanswered === 1 ? "" : "s"}. Submit as-is?`)) return;
+   218→    }
+   219→    try {
+   220→      await api("/api/attempts", {
+   221→        method: "POST",
+   222→        body: JSON.stringify({ action: "submit", attemptId, answers: quizAnswers, auto }),
+   223→      });
+   224→    } catch { /* silent */ }
+   225→    setQuizSubmitted(true);
+   226→    showReview(attemptId);
+   227→  };
+   228→
+   229→  // Save progress
+   230→  const saveProgress = async () => {
+   231→    if (!attemptId || quizSubmitted) return;
+   232→    try {
+   233→      const data = await api("/api/attempts", {
+   234→        method: "POST",
+   235→        body: JSON.stringify({ action: "save", attemptId, answers: quizAnswers }),
+   236→      });
+   237→      if (data.status === "saved") toast.success("Saved");
+   238→      if (data.status === "expired" || data.status === "already_submitted") { void submitQuiz(true); }
+   239→    } catch { /* silent */ }
+   240→  };
+   241→
+   242→  // Quiz start
+   243→  const startQuiz = async (quizId: string) => {
+   244→    if (!user) { setView("auth"); return; }
+   245→    const data = await api("/api/attempts", {
+   246→      method: "POST",
+   247→      body: JSON.stringify({ action: "start", quizId }),
+   248→    });
+   249→    if (data.status === "already_submitted") {
+   250→      showReview(data.attemptId);
+   251→      return;
+   252→    }
+   253→    if (data.error) { toast.error(data.error); return; }
+   254→    setQuizData({ quiz: { id: quizId, title: data.durationMin ? "" : "", description: null, durationMinutes: data.durationMin || 40 }, questions: data.questions });
+   255→    setQuizAnswers(data.answers || []);
+   256→    setAttemptId(data.attemptId);
+   257→    setQuizStartTime(data.startedAt);
+   258→    setServerTimeOffset(data.serverNow - Date.now());
+   259→    setQuizStarted(true);
+   260→    setQuizSubmitted(false);
+   261→    setReviewData(null);
+   262→    setView("quiz");
+   263→  };
+   264→
+   265→  // Admin: Save subject
+   266→  const saveSubject = async () => {
+   267→    if (!subjectName.trim()) { toast.error("Subject name is required"); return; }
+   268→    if (editSubject) {
+   269→      await api("/api/subjects", { method: "PUT", body: JSON.stringify({ id: editSubject.id, name: subjectName, description: subjectDesc }) });
+   270→      toast.success("Subject updated");
+   271→    } else {
+   272→      await api("/api/subjects", { method: "POST", body: JSON.stringify({ name: subjectName, description: subjectDesc }) });
+   273→      toast.success("Subject added");
+   274→    }
+   275→    setSubjectDialog(false);
+   276→    setEditSubject(null);
+   277→    setSubjectName(""); setSubjectDesc("");
+   278→    loadSubjects();
+   279→  };
+   280→
+   281→  // Admin: Delete subject
+   282→  const deleteSubject = async (id: string) => {
+   283→    if (!confirm("Are you sure you want to delete this subject and all its quizzes?")) return;
+   284→    const data = await api(`/api/subjects?id=${id}`, { method: "DELETE" });
+   285→    if (data.error) { toast.error(data.error); return; }
+   286→    toast.success("Subject deleted");
+   287→    loadSubjects();
+   288→  };
+   289→
+   290→  // Admin: Save quiz
+   291→  const saveQuiz = async () => {
+   292→    if (!quizTitle.trim() || !quizSubjectId) { toast.error("Please fill in all required fields"); return; }
+   293→    if (editQuiz) {
+   294→      await api("/api/quizzes", { method: "PUT", body: JSON.stringify({ id: editQuiz.id, title: quizTitle, description: quizDesc, durationMinutes: parseInt(quizDuration) || 40 }) });
+   295→      toast.success("Quiz updated");
+   296→    } else {
+   297→      await api("/api/quizzes", { method: "POST", body: JSON.stringify({ title: quizTitle, description: quizDesc, durationMinutes: parseInt(quizDuration) || 40, subjectId: quizSubjectId }) });
+   298→      toast.success("Quiz added");
+   299→    }
+   300→    setQuizDialog(false);
+   301→    setEditQuiz(null);
+   302→    setQuizTitle(""); setQuizDesc(""); setQuizDuration("40");
+   303→    loadSubjects();
+   304→  };
+   305→
+   306→  // Admin: Delete quiz
+   307→  const deleteQuiz = async (id: string) => {
+   308→    if (!confirm("Delete this quiz?")) return;
+   309→    await api(`/api/quizzes?id=${id}`, { method: "DELETE" });
+   310→    toast.success("Quiz deleted");
+   311→    loadSubjects();
+   312→  };
+   313→
+   314→  // Admin: Import preview
+   315→  const handleImportPreview = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   316→    const file = e.target.files?.[0];
+   317→    if (!file || !importQuizId) return;
+   318→    setImportLoading(true);
+   319→    const fd = new FormData();
+   320→    fd.append("file", file);
+   321→    fd.append("quizId", importQuizId);
+   322→    fd.append("action", "preview");
+   323→    const data = await api("/api/import", { method: "POST", body: fd });
+   324→    if (data.questions) {
+   325→      setImportPreview(data.questions);
+   326→      toast.success(`Extracted ${data.count} questions`);
+   327→    } else {
+   328→      toast.error(data.error || "Import failed");
+   329→    }
+   330→    setImportLoading(false);
+   331→  };
+   332→
+   333→  // Admin: Confirm import
+   334→  const confirmImport = async () => {
+   335→    if (!importQuizId || !importPreview.length) return;
+   336→    setImportLoading(true);
+   337→    const fd = new FormData();
+   338→    if (confirmFileRef.current?.files?.[0]) {
+   339→      fd.append("file", confirmFileRef.current.files[0]);
+   340→    }
+   341→    fd.append("quizId", importQuizId);
+   342→    fd.append("action", "confirm");
+   343→    fd.append("questions", JSON.stringify(importPreview));
+   344→    const data = await api("/api/import", { method: "POST", body: fd });
+   345→    if (data.status === "imported") {
+   346→      toast.success(`Successfully imported ${data.count} questions`);
+   347→      setImportDialog(false);
+   348→      setImportPreview([]);
+   349→      loadSubjects();
+   350→    } else {
+   351→      toast.error(data.error || "Import failed");
+   352→    }
+   353→    setImportLoading(false);
+   354→  };
+   355→
+   356→  // Navigation helpers
+   357→  const goHome = () => { setView("home"); setCurrentSubject(null); setMobileMenuOpen(false); };
+   358→  const goToSubject = (subject: Subject) => {
+   359→    setCurrentSubject(subject);
+   360→    loadSubjectQuizzes(subject.id);
+   361→    setView("subject");
+   362→    setMobileMenuOpen(false);
+   363→  };
+   364→  const goToDashboard = () => {
+   365→    loadDashboard();
+   366→    setView("dashboard");
+   367→    setMobileMenuOpen(false);
+   368→  };
+   369→  const goToAdmin = () => { setView("admin"); setMobileMenuOpen(false); };
+   370→
+   371→  // Calculate total pending
+   372→  const totalPending = subjects.reduce((sum, s) => sum + s.pendingQuizzes, 0);
+   373→
+   374→  if (loading) {
+   375→    return (
+   376→      <div className="min-h-screen flex items-center justify-center">
+   377→        <div className="text-center">
+   378→          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+   379→          <p className="text-muted-foreground">Loading...</p>
+   380→        </div>
+   381→      </div>
+   382→    );
+   383→  }
+   384→
+   385→  // ==================== RENDER ====================
+   386→  return (
+   387→    <div className="min-h-screen flex flex-col bg-background">
+   388→      {/* ===== Top Bar ===== */}
+   389→      <header className="sticky top-0 z-50 bg-card border-b border-border shadow-sm">
+   390→        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
+   391→          <div className="flex items-center gap-3">
+   392→            <button onClick={() => { if (view !== "home") { goHome(); } else { setMobileMenuOpen(!mobileMenuOpen); } }} className="p-2 rounded-lg hover:bg-secondary transition-colors">
+   393→              {view !== "home" ? <ChevronLeft className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+   394→            </button>
+   395→            <button onClick={goHome} className="font-bold text-lg hover:opacity-80 transition-opacity">
+   396→              Dr. Rahma <span className="text-primary">·</span> Quiz Bank
+   397→            </button>
+   398→          </div>
+   399→          <div className="flex items-center gap-2">
+   400→            {user ? (
+   401→              <>
+   402→                {user.role === "student" && (
+   403→                  <Button variant="ghost" size="sm" onClick={goToDashboard} className="gap-1.5 text-sm">
+   404→                    <LayoutDashboard className="w-4 h-4" />
+   405→                    <span className="hidden sm:inline">My Results</span>
+   406→                  </Button>
+   407→                )}
+   408→                {user.role === "admin" && (
+   409→                  <>
+   410→                    <Button variant="ghost" size="sm" onClick={goToDashboard} className="gap-1.5 text-sm">
+   411→                      <BarChart3 className="w-4 h-4" />
+   412→                      <span className="hidden sm:inline">Results</span>
+   413→                    </Button>
+   414→                    <Button size="sm" onClick={goToAdmin} className="gap-1.5 bg-primary">
+   415→                      <Shield className="w-4 h-4" />
+   416→                      <span className="hidden sm:inline">Teacher Panel</span>
+   417→                    </Button>
+   418→                  </>
+   419→                )}
+   420→                <div className="w-px h-6 bg-border mx-1" />
+   421→                <Button variant="ghost" size="sm" onClick={logout} className="gap-1.5 text-sm text-destructive">
+   422→                  <LogOut className="w-4 h-4" />
+   423→                  <span className="hidden sm:inline">Logout</span>
+   424→                </Button>
+   425→              </>
+   426→            ) : (
+   427→              <>
+   428→                <Button variant="ghost" size="sm" onClick={() => { setAuthRole("teacher"); setAuthMode("login"); setView("auth"); }} className="gap-1.5 text-primary">
+   429→                  <Shield className="w-4 h-4" />
+   430→                  <span className="hidden sm:inline">Teacher</span>
+   431→                </Button>
+   432→                <Button size="sm" onClick={() => { setAuthRole("student"); setAuthMode("login"); setView("auth"); }} className="gap-1.5">
+   433→                  <LogIn className="w-4 h-4" />
+   434→                  <span>Login</span>
+   435→                </Button>
+   436→              </>
+   437→            )}
+   438→          </div>
+   439→        </div>
+   440→      </header>
+   441→
+   442→      {/* ===== Mobile Menu ===== */}
+   443→      <AnimatePresence>
+   444→        {mobileMenuOpen && view === "home" && (
+   445→          <motion.div
+   446→            initial={{ opacity: 0, y: -10 }}
+   447→            animate={{ opacity: 1, y: 0 }}
+   448→            exit={{ opacity: 0, y: -10 }}
+   449→            className="absolute top-14 left-0 right-0 z-40 bg-card border-b border-border shadow-lg p-4"
+   450→          >
+   451→            <div className="flex flex-col gap-2">
+   452→              {user?.role === "student" && (
+   453→                <Button variant="ghost" className="justify-start gap-2" onClick={goToDashboard}>
+   454→                  <LayoutDashboard className="w-4 h-4" /> My Results
+   455→                </Button>
+   456→              )}
+   457→              {user?.role === "admin" && (
+   458→                <>
+   459→                  <Button variant="ghost" className="justify-start gap-2" onClick={goToDashboard}>
+   460→                    <BarChart3 className="w-4 h-4" /> Results
+   461→                  </Button>
+   462→                  <Button variant="ghost" className="justify-start gap-2" onClick={goToAdmin}>
+   463→                    <Shield className="w-4 h-4" /> Teacher Panel
+   464→                  </Button>
+   465→                </>
+   466→              )}
+   467→            </div>
+   468→          </motion.div>
+   469→        )}
+   470→      </AnimatePresence>
+   471→
+   472→      {/* ===== Main Content ===== */}
+   473→      <main className="flex-1">
+   474→        <AnimatePresence mode="wait">
+   475→
+   476→          {/* ========== HOME ========== */}
+   477→          {view === "home" && !user && (
+   478→            <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-lg mx-auto px-4 py-16">
+   479→              <div className="text-center mb-10">
+   480→                <h1 className="text-3xl font-bold mb-2">Dr. Rahma · Quiz Bank</h1>
+   481→                <p className="text-muted-foreground">Choose how you want to continue</p>
+   482→              </div>
+   483→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   484→                <button onClick={() => { setAuthRole("student"); setAuthMode("login"); setView("auth"); }}
+   485→                  className="bg-card border-2 border-border rounded-xl p-6 text-center hover:border-primary hover:shadow-lg transition-all group">
+   486→                  <div className="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
+   487→                    <Users className="w-7 h-7 text-blue-600" />
+   488→                  </div>
+   489→                  <h2 className="font-bold text-lg mb-1">Student</h2>
+   490→                  <p className="text-sm text-muted-foreground">Take quizzes and view your results</p>
+   491→                </button>
+   492→                <button onClick={() => { setAuthRole("teacher"); setAuthMode("login"); setView("auth"); }}
+   493→                  className="bg-card border-2 border-border rounded-xl p-6 text-center hover:border-primary hover:shadow-lg transition-all group">
+   494→                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
+   495→                    <Shield className="w-7 h-7 text-primary" />
+   496→                  </div>
+   497→                  <h2 className="font-bold text-lg mb-1">Teacher</h2>
+   498→                  <p className="text-sm text-muted-foreground">Manage subjects, quizzes & questions</p>
+   499→                </button>
+   500→              </div>
+   501→            </motion.div>
+   502→          )}
+   503→
+   504→          {view === "home" && user && (
+   505→            <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+   506→              <div className="mb-6">
+   507→                <h1 className="text-2xl font-bold mb-1">Subjects</h1>
+   508→                <p className="text-muted-foreground text-sm">Pick a subject to see available quizzes</p>
+   509→              </div>
+   510→
+   511→              {totalPending > 0 && user?.role === "student" && (
+   512→                <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+   513→                  className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2 text-sm">
+   514→                  <AlertTriangle className="w-4 h-4 text-primary" />
+   515→                  <span>You have <strong>{totalPending}</strong> unfinished quiz{totalPending === 1 ? "" : "zes"}</span>
+   516→                </motion.div>
+   517→              )}
+   518→
+   519→              {subjects.length === 0 ? (
+   520→                <Card className="p-6 text-center">
+   521→                  <BookOpen className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+   522→                  <p className="text-muted-foreground">No subjects yet. The teacher can add them from the Teacher Panel.</p>
+   523→                </Card>
+   524→              ) : (
+   525→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   526→                  {subjects.map((subject, i) => (
+   527→                    <motion.button key={subject.id}
+   528→                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+   529→                      onClick={() => goToSubject(subject)}
+   530→                      className="bg-card border border-border rounded-xl p-5 text-left hover:border-primary hover:shadow-md transition-all group"
+   531→                    >
+   532→                      <div className="flex items-start justify-between mb-2">
+   533→                        <FolderOpen className="w-5 h-5 text-primary group-hover:scale-110 transition-transform" />
+   534→                        <h3 className="font-semibold text-base">{subject.name}</h3>
+   535→                      </div>
+   536→                      {subject.description && (
+   537→                        <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{subject.description}</p>
+   538→                      )}
+   539→                      <div className="flex gap-4 text-sm">
+   540→                        <div className="font-mono text-primary font-semibold">{subject.quizCount}<span className="block text-xs text-muted-foreground font-sans font-normal">quiz{subject.quizCount === 1 ? "" : "zes"}</span></div>
+   541→                        {user?.role === "student" && subject.pendingQuizzes > 0 && (
+   542→                          <div className="font-mono text-destructive font-semibold">{subject.pendingQuizzes}<span className="block text-xs text-muted-foreground font-sans font-normal">remaining</span></div>
+   543→                        )}
+   544→                      </div>
+   545→                    </motion.button>
+   546→                  ))}
+   547→                </div>
+   548→              )}
+   549→            </motion.div>
+   550→          )}
+   551→
+   552→          {/* ========== SUBJECT ========== */}
+   553→          {view === "subject" && currentSubject && (
+   554→            <motion.div key="subject" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+   555→              <div className="mb-6">
+   556→                <h1 className="text-2xl font-bold mb-1">{currentSubject.name}</h1>
+   557→                {currentSubject.description && <p className="text-muted-foreground text-sm">{currentSubject.description}</p>}
+   558→              </div>
+   559→
+   560→              {quizzes.length === 0 ? (
+   561→                <Card className="p-6 text-center">
+   562→                  <HelpCircle className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+   563→                  <p className="text-muted-foreground">No quizzes available in this subject yet.</p>
+   564→                </Card>
+   565→              ) : (
+   566→                <div className="space-y-3">
+   567→                  {quizzes.map((quiz, i) => (
+   568→                    <motion.div key={quiz.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
+   569→                      className="bg-card border border-border rounded-xl p-4 sm:p-5"
+   570→                    >
+   571→                      <div className="flex items-start justify-between gap-3">
+   572→                        <div className="flex-1">
+   573→                          <h3 className="font-semibold mb-1">{quiz.title}</h3>
+   574→                          {quiz.description && <p className="text-sm text-muted-foreground mb-2">{quiz.description}</p>}
+   575→                          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+   576→                            <span className="flex items-center gap-1"><HelpCircle className="w-3.5 h-3.5" /> {quiz.questionCount} questions</span>
+   577→                            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {quiz.durationMinutes} min</span>
+   578→                          </div>
+   579→                        </div>
+   580→                        {quiz.status === "submitted" ? (
+   581→                          <Badge variant="secondary" className="bg-green-100 text-green-700 shrink-0">Completed ✓</Badge>
+   582→                        ) : (
+   583→                          <Button onClick={() => startQuiz(quiz.id)} size="sm" className="shrink-0 gap-1.5">
+   584→                            <Play className="w-4 h-4" /> Start
+   585→                          </Button>
+   586→                        )}
+   587→                      </div>
+   588→                    </motion.div>
+   589→                  ))}
+   590→                </div>
+   591→              )}
+   592→            </motion.div>
+   593→          )}
+   594→
+   595→          {/* ========== QUIZ ========== */}
+   596→          {view === "quiz" && (
+   597→            <motion.div key="quiz" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-4xl mx-auto px-4 py-6">
+   598→              {/* Quiz Header */}
+   599→              <div className="bg-card border border-border rounded-xl p-4 mb-4">
+   600→                <div className="flex items-center justify-between mb-2">
+   601→                  <h1 className="font-bold text-lg">{quizData?.quiz.title || "Quiz"}</h1>
+   602→                  {quizStarted && !quizSubmitted && (
+   603→                    <div className={`font-mono text-xl px-3 py-1.5 rounded-lg border ${timeRemaining < 60000 ? "bg-red-50 border-red-400 text-red-600 timer-pulse" : "bg-secondary border-primary/30 text-primary"}`}>
+   604→                      {fmtTime(timeRemaining)}
+   605→                    </div>
+   606→                  )}
+   607→                </div>
+   608→                {quizData?.quiz.description && <p className="text-sm text-muted-foreground">{quizData.quiz.description}</p>}
+   609→
+   610→                {/* Landing */}
+   611→                {!quizStarted && !quizSubmitted && quizData && (
+   612→                  <div className="mt-4">
+   613→                    <div className="flex gap-6 py-3 border-y border-border mb-4">
+   614→                      <div><span className="block font-mono text-xl text-primary">{quizData.questions.length}</span><span className="text-xs text-muted-foreground">questions</span></div>
+   615→                      <div><span className="block font-mono text-xl text-primary">{quizData.quiz.durationMinutes}:00</span><span className="text-xs text-muted-foreground">time allowed</span></div>
+   616→                      <div><span className="block font-mono text-xl text-primary">{quizData.questions.reduce((s, q) => s + q.points, 0)}</span><span className="text-xs text-muted-foreground">points</span></div>
+   617→                    </div>
+   618→                    <p className="text-sm text-muted-foreground bg-secondary rounded-lg p-3 border-l-4 border-primary">
+   619→                      Your answers are auto-saved every few seconds. When time runs out, the quiz is submitted automatically. Each quiz can only be taken once.
+   620→                    </p>
+   621→                    <Button onClick={() => startQuiz(quizData.quiz.id)} className="mt-4 gap-2 w-full sm:w-auto">
+   622→                      <Play className="w-4 h-4" /> Start Quiz ({quizData.quiz.durationMinutes} min)
+   623→                    </Button>
+   624→                  </div>
+   625→                )}
+   626→              </div>
+   627→
+   628→              {/* Progress */}
+   629→              {quizStarted && !quizSubmitted && (
+   630→                <div className="mb-4">
+   631→                  <Progress value={quizAnswers.filter(a => a !== null).length / (quizData?.questions.length || 1) * 100} className="h-2" />
+   632→                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
+   633→                    <span>{quizAnswers.filter(a => a !== null).length} / {quizData?.questions.length} answered</span>
+   634→                    <span></span>
+   635→                  </div>
+   636→                </div>
+   637→              )}
+   638→
+   639→              {/* Questions */}
+   640→              {quizStarted && !quizSubmitted && quizData && (
+   641→                <div className="space-y-4">
+   642→                  {quizData.questions.map((q, qi) => (
+   643→                    <motion.div key={q.id} id={`q-${qi}`} className={`bg-card border rounded-xl p-4 scroll-mt-40 transition-colors ${quizAnswers[qi] !== null ? "border-primary" : "border-border"}`}>
+   644→                      {q.imageUrl && (
+   645→                        <div className="mb-3 rounded-lg overflow-hidden bg-secondary">
+   646→                          <img src={q.imageUrl} alt="Question image" className="max-h-64 w-auto mx-auto object-contain" />
+   647→                        </div>
+   648→                      )}
+   649→                      <div className="flex items-start gap-2 mb-3">
+   650→                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-secondary text-primary text-xs font-bold shrink-0 mt-0.5">{qi + 1}</span>
+   651→                        <p className="font-medium text-sm leading-relaxed">{q.text}{q.points > 1 ? ` (${q.points} pts)` : ""}</p>
+   652→                      </div>
+   653→                      <div className="space-y-1.5 ml-8">
+   654→                        {q.choices.map((choice, ci) => (
+   655→                          <label key={ci} className={`quiz-choice flex items-center gap-3 p-2.5 rounded-lg border ${quizAnswers[qi] === ci ? "selected border-primary bg-secondary" : "border-transparent"}`} onClick={() => {
+   656→                            const newAnswers = [...quizAnswers];
+   657→                            newAnswers[qi] = ci;
+   658→                            setQuizAnswers(newAnswers);
+   659→                          }}>
+   660→                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${quizAnswers[qi] === ci ? "border-primary" : "border-muted-foreground/30"}`}>
+   661→                              {quizAnswers[qi] === ci && <div className="w-2 h-2 rounded-full bg-primary" />}
+   662→                            </div>
+   663→                            <span className="text-sm">{choice}</span>
+   664→                          </label>
+   665→                        ))}
+   666→                      </div>
+   667→                    </motion.div>
+   668→                  ))}
+   669→                </div>
+   670→              )}
+   671→
+   672→              {/* Submit Bar */}
+   673→              {quizStarted && !quizSubmitted && (
+   674→                <div className="sticky bottom-0 bg-background/80 backdrop-blur-sm pt-4 pb-2 mt-4">
+   675→                  <div className="flex gap-2">
+   676→                    <Button variant="outline" onClick={saveProgress} className="gap-1.5"><Save className="w-4 h-4" /> Save</Button>
+   677→                    <Button onClick={() => submitQuiz(false)} className="flex-1 gap-1.5"><Send className="w-4 h-4" /> Submit Quiz</Button>
+   678→                  </div>
+   679→                </div>
+   680→              )}
+   681→
+   682→              {/* Review Results */}
+   683→              {quizSubmitted && reviewData && (
+   684→                <div>
+   685→                  <div className="bg-card border border-border rounded-xl p-6 text-center mb-6">
+   686→                    <Award className="w-12 h-12 mx-auto mb-3 text-primary" />
+   687→                    <div className="font-mono text-4xl font-bold text-primary">{reviewData.score} / {reviewData.totalPoints}</div>
+   688→                    <p className="text-muted-foreground mt-1">{reviewData.percent}% correct</p>
+   689→                  </div>
+   690→                  <div className="space-y-4">
+   691→                    {reviewData.questions.map((q, qi) => {
+   692→                      const isCorrect = q.picked === q.correct;
+   693→                      return (
+   694→                        <div key={q.id} className={`bg-card border rounded-xl p-4 ${isCorrect ? "border-green-500 bg-green-50" : "border-red-400 bg-red-50"}`}>
+   695→                          <div className={`text-xs font-bold uppercase tracking-wide mb-2 ${isCorrect ? "text-green-600" : "text-red-600"}`}>
+   696→                            {isCorrect ? "✓ Correct" : (q.picked === null ? "No answer" : "✗ Incorrect")}
+   697→                          </div>
+   698→                          {q.imageUrl && (
+   699→                            <div className="mb-3 rounded-lg overflow-hidden bg-white">
+   700→                              <img src={q.imageUrl} alt="Question image" className="max-h-48 w-auto mx-auto object-contain" />
+   701→                            </div>
+   702→                          )}
+   703→                          <div className="flex items-start gap-2 mb-3">
+   704→                            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-white text-primary text-xs font-bold shrink-0">{qi + 1}</span>
+   705→                            <p className="font-medium text-sm">{q.text}</p>
+   706→                          </div>
+   707→                          <div className="space-y-1.5 ml-8">
+   708→                            {q.choices.map((c, ci) => (
+   709→                              <div key={c.id} className={`p-2.5 rounded-lg text-sm ${ci === q.correct ? "font-bold text-green-700 bg-green-100" : ci === q.picked && !isCorrect ? "line-through text-red-600 bg-red-100" : "text-muted-foreground"}`}>
+   710→                                {c.text}{ci === q.correct ? " ✓" : ""}{ci === q.picked && !isCorrect ? " ✗" : ""}
+   711→                              </div>
+   712→                            ))}
+   713→                          </div>
+   714→                        </div>
+   715→                      );
+   716→                    })}
+   717→                  </div>
+   718→                  <div className="text-center mt-6">
+   719→                    <Button onClick={goHome} className="gap-2">Back to Home</Button>
+   720→                  </div>
+   721→                </div>
+   722→              )}
+   723→            </motion.div>
+   724→          )}
+   725→
+   726→          {/* ========== DASHBOARD ========== */}
+   727→          {view === "dashboard" && user?.role === "student" && (
+   728→            <motion.div key="dashboard" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+   729→              <div className="mb-6">
+   730→                <h1 className="text-2xl font-bold mb-1">My Results</h1>
+   731→                <p className="text-muted-foreground text-sm">Hello, {user.name || user.email}</p>
+   732→              </div>
+   733→
+   734→              {totalPending > 0 && (
+   735→                <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+   736→                  className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2 text-sm">
+   737→                  <AlertTriangle className="w-4 h-4 text-primary" />
+   738→                  <span>You have <strong>{totalPending}</strong> unfinished quiz{totalPending === 1 ? "" : "zes"}</span>
+   739→                  <Button variant="ghost" size="sm" onClick={goHome} className="ml-auto text-primary">View Subjects</Button>
+   740→                </motion.div>
+   741→              )}
+   742→
+   743→              {attempts.length === 0 ? (
+   744→                <Card className="p-6 text-center">
+   745→                  <BarChart3 className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+   746→                  <p className="text-muted-foreground">No results yet. Start a quiz to see your scores!</p>
+   747→                </Card>
+   748→              ) : (
+   749→                <div className="space-y-3">
+   750→                  {attempts.map((attempt, i) => (
+   751→                    <motion.div key={attempt.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
+   752→                      className="bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-3"
+   753→                    >
+   754→                      <div className="flex-1 min-w-0">
+   755→                        <h3 className="font-semibold text-sm truncate">{attempt.quiz.title}</h3>
+   756→                        <p className="text-xs text-muted-foreground mt-0.5">{attempt.quiz.subjectName} • {new Date(attempt.submittedAt).toLocaleDateString()}</p>
+   757→                      </div>
+   758→                      <div className="text-center shrink-0">
+   759→                        <div className={`font-mono text-xl font-bold ${attempt.percent >= 60 ? "text-green-600" : "text-destructive"}`}>{attempt.percent}%</div>
+   760→                        <div className="text-xs text-muted-foreground">{attempt.score}/{attempt.totalPoints}</div>
+   761→                      </div>
+   762→                      <Button variant="ghost" size="sm" onClick={() => showReview(attempt.id)} className="shrink-0 gap-1">
+   763→                        <Eye className="w-4 h-4" /> Review
+   764→                      </Button>
+   765→                    </motion.div>
+   766→                  ))}
+   767→                </div>
+   768→              )}
+   769→            </motion.div>
+   770→          )}
+   771→
+   772→          {/* ========== AUTH ========== */}
+   773→          {view === "auth" && !user && (
+   774→            <motion.div key="auth" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="max-w-sm mx-auto px-4 py-16">
+   775→              <Card className="p-6">
+   776→                <div className="text-center mb-6">
+   777→                  <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 ${authRole === "teacher" ? "bg-primary/10" : "bg-blue-50"}`}>
+   778→                    {authRole === "teacher" ? <Shield className="w-6 h-6 text-primary" /> : <LogIn className="w-6 h-6 text-blue-600" />}
+   779→                  </div>
+   780→                  <h2 className="text-xl font-bold">
+   781→                    {authRole === "teacher" ? "Teacher Sign In" : authMode === "login" ? "Student Sign In" : "Student Sign Up"}
+   782→                  </h2>
+   783→                  <p className="text-xs text-muted-foreground mt-1">
+   784→                    {authRole === "teacher" ? "Access the teacher management panel" : authMode === "login" ? "Login to take quizzes" : "Create a new student account"}
+   785→                  </p>
+   786→                </div>
+   787→
+   788→                {/* Role switcher */}
+   789→                {authMode === "login" && (
+   790→                  <div className="flex rounded-lg border border-border p-0.5 mb-5">
+   791→                    <button onClick={() => setAuthRole("student")} className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${authRole === "student" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+   792→                      Student
+   793→                    </button>
+   794→                    <button onClick={() => setAuthRole("teacher")} className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${authRole === "teacher" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+   795→                      Teacher
+   796→                    </button>
+   797→                  </div>
+   798→                )}
+   799→
+   800→                <div className="space-y-4">
+   801→                  {authRole === "student" && authMode === "register" && (
+   802→                    <div>
+   803→                      <Label>Full Name</Label>
+   804→                      <Input placeholder="John Doe" value={authName} onChange={e => setAuthName(e.target.value)} className="mt-1" />
+   805→                    </div>
+   806→                  )}
+   807→                  <div>
+   808→                    <Label>Email</Label>
+   809→                    <Input type="email" placeholder="you@example.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="mt-1" />
+   810→                  </div>
+   811→                  <div>
+   812→                    <Label>Password</Label>
+   813→                    <Input type="password" placeholder="•••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" />
+   814→                  </div>
+   815→                  <Button onClick={handleAuth} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
+   816→                    {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
+   817→                    {authRole === "teacher" ? "Sign In as Teacher" : authMode === "login" ? "Sign In" : "Create Account"}
+   818→                  </Button>
+   819→                </div>
+   820→
+   821→                {authRole === "student" && (
+   822→                  <div className="mt-4 text-center text-sm">
+   823→                    <button onClick={() => setAuthMode(authMode === "login" ? "register" : "login")} className="text-primary font-semibold hover:underline">
+   824→                      {authMode === "login" ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+   825→                    </button>
+   826→                  </div>
+   827→                )}
+   828→              </Card>
+   829→            </motion.div>
+   830→          )}
+   831→
+   832→          {/* ========== ADMIN ========== */}
+   833→          {view === "admin" && user?.role === "admin" && (
+   834→            <motion.div key="admin" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
+   835→              <div className="mb-6">
+   836→                <h1 className="text-2xl font-bold mb-1">Teacher Panel</h1>
+   837→                <p className="text-muted-foreground text-sm">Hello, {user.name || user.email} — manage subjects, quizzes & questions</p>
+   838→              </div>
+   839→
+   840→              <Tabs value={adminTab} onValueChange={setAdminTab}>
+   841→                <TabsList className="w-full mb-6">
+   842→                  <TabsTrigger value="subjects" className="flex-1 gap-1.5"><FolderOpen className="w-4 h-4" /> Subjects</TabsTrigger>
+   843→                  <TabsTrigger value="quizzes" className="flex-1 gap-1.5"><FileText className="w-4 h-4" /> Quizzes</TabsTrigger>
+   844→                  <TabsTrigger value="import" className="flex-1 gap-1.5"><Upload className="w-4 h-4" /> Import</TabsTrigger>
+   845→                </TabsList>
+   846→
+   847→                {/* Subjects Tab */}
+   848→                <TabsContent value="subjects">
+   849→                  <div className="flex items-center justify-between mb-4">
+   850→                    <h2 className="font-semibold">Subjects ({subjects.length})</h2>
+   851→                    <Button size="sm" onClick={() => { setEditSubject(null); setSubjectName(""); setSubjectDesc(""); setSubjectDialog(true); }} className="gap-1.5">
+   852→                      <Plus className="w-4 h-4" /> Add Subject
+   853→                    </Button>
+   854→                  </div>
+   855→                  {subjects.length === 0 ? (
+   856→                    <Card className="p-6 text-center text-muted-foreground">No subjects yet</Card>
+   857→                  ) : (
+   858→                    <div className="space-y-2">
+   859→                      {subjects.map((s) => (
+   860→                        <div key={s.id} className="bg-card border border-border rounded-lg p-3 flex items-center justify-between">
+   861→                          <div>
+   862→                            <h3 className="font-semibold text-sm">{s.name}</h3>
+   863→                            <p className="text-xs text-muted-foreground">{s.description || "No description"} • {s.quizCount} quiz{ s.quizCount === 1 ? "" : "zes"}</p>
+   864→                          </div>
+   865→                          <div className="flex gap-1">
+   866→                            <Button variant="ghost" size="sm" onClick={() => { setEditSubject(s); setSubjectName(s.name); setSubjectDesc(s.description || ""); setSubjectDialog(true); }}><Edit3 className="w-4 h-4" /></Button>
+   867→                            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteSubject(s.id)}><Trash2 className="w-4 h-4" /></Button>
+   868→                          </div>
+   869→                        </div>
+   870→                      ))}
+   871→                    </div>
+   872→                  )}
+   873→                </TabsContent>
+   874→
+   875→                {/* Quizzes Tab */}
+   876→                <TabsContent value="quizzes">
+   877→                  <div className="flex items-center justify-between mb-4">
+   878→                    <h2 className="font-semibold">Quizzes</h2>
+   879→                    <Button size="sm" onClick={() => { setEditQuiz(null); setQuizTitle(""); setQuizDesc(""); setQuizDuration("40"); setQuizSubjectId(subjects[0]?.id || ""); setQuizDialog(true); }} className="gap-1.5">
+   880→                      <Plus className="w-4 h-4" /> Add Quiz
+   881→                    </Button>
+   882→                  </div>
+   883→                  {subjects.length === 0 ? (
+   884→                    <Card className="p-6 text-center text-muted-foreground">Add subjects first, then create quizzes</Card>
+   885→                  ) : (
+   886→                    <div className="space-y-2">
+   887→                      {subjects.map((s) => (
+   888→                        s.quizzes.length > 0 && (
+   889→                          <div key={s.id} className="mb-4">
+   890→                            <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-1.5"><FolderOpen className="w-4 h-4" /> {s.name}</h3>
+   891→                            {s.quizzes.map((q) => (
+   892→                              <div key={q.id} className="bg-card border border-border rounded-lg p-3 mb-2 flex items-center justify-between">
+   893→                                <div>
+   894→                                  <h4 className="font-semibold text-sm">{q.title}</h4>
+   895→                                  <p className="text-xs text-muted-foreground">{q.questionCount} questions • {q.durationMinutes} min • {q.attemptCount} attempt{q.attemptCount === 1 ? "" : "s"}</p>
+   896→                                </div>
+   897→                                <div className="flex gap-1">
+   898→                                  <Button variant="ghost" size="sm" onClick={() => { setEditQuiz(q); setQuizTitle(q.title); setQuizDesc(q.description || ""); setQuizDuration(String(q.durationMinutes)); setQuizSubjectId(s.id); setQuizDialog(true); }}><Edit3 className="w-4 h-4" /></Button>
+   899→                                  <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteQuiz(q.id)}><Trash2 className="w-4 h-4" /></Button>
+   900→                                </div>
+   901→                              </div>
+   902→                            ))}
+   903→                          </div>
+   904→                        )
+   905→                      ))}
+   906→                    </div>
+   907→                  )}
+   908→                </TabsContent>
+   909→
+   910→                {/* Import Tab */}
+   911→                <TabsContent value="import">
+   912→                  <div className="mb-4">
+   913→                    <h2 className="font-semibold mb-1">Import Questions</h2>
+   914→                    <p className="text-sm text-muted-foreground">Upload a Word (.docx) or Excel (.xlsx) file to auto-import questions</p>
+   915→                  </div>
+   916→                  <Card className="p-5">
+   917→                    <div className="space-y-4">
+   918→                      <div>
+   919→                        <Label>Select Quiz</Label>
+   920→                        <select value={importQuizId} onChange={e => setImportQuizId(e.target.value)} className="w-full mt-1 p-2.5 border border-border rounded-lg text-sm bg-background">
+   921→                          <option value="">-- Select a quiz --</option>
+   922→                          {subjects.flatMap(s => s.quizzes.map(q => ({ ...q, subjectName: s.name }))).map(q => (
+   923→                            <option key={q.id} value={q.id}>{q.subjectName} — {q.title}</option>
+   924→                          ))}
+   925→                        </select>
+   926→                      </div>
+   927→                      <div>
+   928→                        <Label>Upload File</Label>
+   929→                        <div className="mt-1 border-2 border-dashed border-border rounded-lg p-6 text-center">
+   930→                          <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+   931→                          <p className="text-sm text-muted-foreground mb-2">Drag & drop or click to choose</p>
+   932→                          <input ref={importFileRef} type="file" accept=".docx,.xlsx,.xls" onChange={handleImportPreview} className="text-sm" />
+   933→                        </div>
+   934→                      </div>
+   935→
+   936→                      {importLoading && <div className="text-center text-sm text-muted-foreground">Processing...</div>}
+   937→
+   938→                      {importPreview.length > 0 && (
+   939→                        <div>
+   940→                          <div className="flex items-center justify-between mb-2">
+   941→                            <h3 className="font-semibold text-sm">Preview ({importPreview.length} questions)</h3>
+   942→                          </div>
+   943→                          <div className="max-h-96 overflow-y-auto custom-scroll space-y-2 border border-border rounded-lg p-3">
+   944→                            {importPreview.map((q, i) => (
+   945→                              <div key={i} className="bg-secondary/50 rounded-lg p-3">
+   946→                                <div className="flex items-start gap-2 mb-2">
+   947→                                  <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-bold shrink-0">{i + 1}</span>
+   948→                                  <p className="text-sm font-medium">{q.text}</p>
+   949→                                </div>
+   950→                                {q.imageUrl && <img src={q.imageUrl} alt="" className="max-h-32 rounded-lg mb-2" />}
+   951→                                <div className="ml-7 space-y-1">
+   952→                                  {q.choices.map((c, ci) => (
+   953→                                    <div key={ci} className={`text-xs p-1.5 rounded ${c.isCorrect ? "bg-green-100 text-green-700 font-bold" : "text-muted-foreground"}`}>
+   954→                                      {String.fromCharCode(65 + ci)}) {c.text} {c.isCorrect ? "✓" : ""}
+   955→                                    </div>
+   956→                                  ))}
+   957→                                </div>
+   958→                              </div>
+   959→                            ))}
+   960→                          </div>
+   961→                          <div className="flex gap-2 mt-4">
+   962→                            <Button onClick={confirmImport} disabled={importLoading} className="flex-1 gap-1.5">
+   963→                              {importLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+   964→                              Confirm Import
+   965→                            </Button>
+   966→                            <Button variant="outline" onClick={() => setImportPreview([])}>Cancel</Button>
+   967→                          </div>
+   968→                        </div>
+   969→                      )}
+   970→                    </div>
+   971→                  </Card>
+   972→                </TabsContent>
+   973→              </Tabs>
+   974→            </motion.div>
+   975→          )}
+   976→        </AnimatePresence>
+   977→      </main>
+   978→
+   979→      {/* ===== Subject Dialog ===== */}
+   980→      <Dialog open={subjectDialog} onOpenChange={setSubjectDialog}>
+   981→        <DialogContent>
+   982→          <DialogHeader><DialogTitle>{editSubject ? "Edit Subject" : "Add New Subject"}</DialogTitle></DialogHeader>
+   983→          <div className="space-y-3">
+   984→            <div><Label>Subject Name</Label><Input value={subjectName} onChange={e => setSubjectName(e.target.value)} placeholder="e.g. Anatomy" className="mt-1" /></div>
+   985→            <div><Label>Description (optional)</Label><Input value={subjectDesc} onChange={e => setSubjectDesc(e.target.value)} placeholder="Brief description" className="mt-1" /></div>
+   986→          </div>
+   987→          <DialogFooter>
+   988→            <Button variant="outline" onClick={() => setSubjectDialog(false)}>Cancel</Button>
+   989→            <Button onClick={saveSubject} disabled={!subjectName.trim()}>Save</Button>
+   990→          </DialogFooter>
+   991→        </DialogContent>
+   992→      </Dialog>
+   993→
+   994→      {/* ===== Quiz Dialog ===== */}
+   995→      <Dialog open={quizDialog} onOpenChange={setQuizDialog}>
+   996→        <DialogContent>
+   997→          <DialogHeader><DialogTitle>{editQuiz ? "Edit Quiz" : "Add New Quiz"}</DialogTitle></DialogHeader>
+   998→          <div className="space-y-3">
+   999→            <div>
+  1000→              <Label>Subject</Label>
+  1001→              <select value={quizSubjectId} onChange={e => setQuizSubjectId(e.target.value)} className="w-full mt-1 p-2.5 border border-border rounded-lg text-sm bg-background">
+  1002→                {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+  1003→              </select>
+  1004→            </div>
+  1005→            <div><Label>Quiz Title</Label><Input value={quizTitle} onChange={e => setQuizTitle(e.target.value)} placeholder="e.g. Unit 1 Quiz" className="mt-1" /></div>
+  1006→            <div><Label>Description (optional)</Label><Input value={quizDesc} onChange={e => setQuizDesc(e.target.value)} placeholder="Brief description" className="mt-1" /></div>
+  1007→            <div><Label>Duration (minutes)</Label><Input type="number" value={quizDuration} onChange={e => setQuizDuration(e.target.value)} className="mt-1" /></div>
+  1008→          </div>
+  1009→          <DialogFooter>
+  1010→            <Button variant="outline" onClick={() => setQuizDialog(false)}>Cancel</Button>
+  1011→            <Button onClick={saveQuiz} disabled={!quizTitle.trim() || !quizSubjectId}>Save</Button>
+  1012→          </DialogFooter>
+  1013→        </DialogContent>
+  1014→      </Dialog>
+  1015→
+  1016→      {/* ===== Footer ===== */}
+  1017→      <footer className="mt-auto border-t border-border bg-card py-4">
+  1018→        <div className="max-w-4xl mx-auto px-4 text-center text-xs text-muted-foreground">
+  1019→          Dr. Rahma — Quiz Bank © {new Date().getFullYear()}
+  1020→        </div>
+  1021→      </footer>
+  1022→    </div>
+  1023→  );
+  1024→}

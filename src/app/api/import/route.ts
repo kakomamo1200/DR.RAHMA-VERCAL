@@ -3,8 +3,9 @@ import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { db } from '@/lib/db';
 import { getUserFromRequest, requireAdmin } from '@/lib/auth';
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile, mkdir, readFile } from 'fs/promises';
 import path from 'path';
+import { existsSync } from 'fs';
 
 async function saveImageToDisk(data: Buffer, ext: string): Promise<string> {
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
@@ -12,6 +13,31 @@ async function saveImageToDisk(data: Buffer, ext: string): Promise<string> {
   await mkdir(uploadDir, { recursive: true });
   await writeFile(path.join(uploadDir, filename), data);
   return `/uploads/${filename}`;
+}
+
+// Generate example Excel file and return its path
+async function generateExampleFile(): Promise<string> {
+  const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+  await mkdir(uploadDir, { recursive: true });
+  const filePath = path.join(uploadDir, 'import-example.xlsx');
+
+  if (existsSync(filePath)) return `/uploads/import-example.xlsx`;
+
+  const wsData = [
+    ['question', 'choice1', 'choice2', 'choice3', 'choice4', 'correct', 'image'],
+    ['What is the largest organ in the human body?', 'Liver', 'Skin', 'Brain', 'Heart', 'B', ''],
+    ['How many bones are in the adult human body?', '186', '206', '226', '256', 'B', ''],
+    ['Which blood type is known as the universal donor?', 'A+', 'B+', 'O-', 'AB+', 'C', ''],
+    ['What is the normal resting heart rate for adults (beats per minute)?', '40-60', '60-100', '100-120', '120-140', 'B', ''],
+    ['Which chamber of the heart pumps blood to the lungs?', 'Left atrium', 'Right ventricle', 'Left ventricle', 'Right atrium', 'B', ''],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 55 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 10 }, { wch: 30 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Questions');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  await writeFile(filePath, buf);
+  return `/uploads/import-example.xlsx`;
 }
 
 async function parseWordFile(buffer: Buffer): Promise<{ questions: { text: string; imageUrl: string | null; choices: { text: string; isCorrect: boolean }[] }[] }> {
@@ -30,7 +56,7 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: { text: strin
     const imgMatch = block.match(/<img[^>]+src="([^"]+)"[^>]*>/i);
     const textContent = block.replace(/<[^>]+>/g, '').trim();
     if (imgMatch && !textContent) { pendingImage = imgMatch[1]; continue; }
-    if (textContent && (textContent.includes('?') || /^\d+[.\-)\:]/.test(textContent) || textContent.length > 10)) {
+    if (textContent && (textContent.includes('?') || /^\d+[.\-):]/.test(textContent) || textContent.length > 10)) {
       const choiceMatches: { letter: string; text: string }[] = [];
       const engRegex = /\(?([A-Da-d])\)?\s*([^\n(]{2,})/g;
       let match; while ((match = engRegex.exec(textContent)) !== null) choiceMatches.push({ letter: match[1].toUpperCase(), text: match[2].trim() });
@@ -82,6 +108,17 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: { text: stri
     if (choices.length >= 2) questions.push({ text, imageUrl, choices });
   }
   return { questions };
+}
+
+// GET: Generate and return example file URL
+export async function GET() {
+  try {
+    const url = await generateExampleFile();
+    return NextResponse.json({ url });
+  } catch (error) {
+    console.error('Example generation error:', error);
+    return NextResponse.json({ error: 'Failed to generate example' }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {

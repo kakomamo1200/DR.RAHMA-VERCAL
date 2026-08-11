@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getUserFromRequest } from '@/lib/auth';
+import { getUserFromRequest, requireAdmin } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,15 +10,28 @@ export async function GET(request: NextRequest) {
     const quizId = searchParams.get('quizId');
     const type = searchParams.get('type');
 
+    // Student: own results
     if (type === 'dashboard') {
       const attempts = await db.attempt.findMany({ where: { userId: user.id, submittedAt: { not: null } }, orderBy: { submittedAt: 'desc' }, include: { quiz: { include: { subject: { select: { name: true } } } } } });
       return NextResponse.json({ attempts: attempts.map(a => ({ id: a.id, score: a.score, totalPoints: a.totalPoints, startedAt: a.startedAt, submittedAt: a.submittedAt, quiz: { id: a.quiz.id, title: a.quiz.title, subjectName: a.quiz.subject.name }, percent: a.totalPoints ? Math.round((a.score! / a.totalPoints) * 100) : 0 })) });
     }
 
+    // Admin: all student results
+    if (type === 'admin-results') {
+      if (!requireAdmin(user)) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      const attempts = await db.attempt.findMany({ where: { submittedAt: { not: null } }, orderBy: { submittedAt: 'desc' }, include: { quiz: { include: { subject: { select: { name: true } } } }, user: { select: { name: true, email: true, role: true } } } });
+      // Filter to show only student attempts (not admin's own test attempts)
+      const studentAttempts = attempts.filter(a => a.user.role === 'student');
+      return NextResponse.json({ attempts: studentAttempts.map(a => ({ id: a.id, score: a.score, totalPoints: a.totalPoints, startedAt: a.startedAt, submittedAt: a.submittedAt, quiz: { id: a.quiz.id, title: a.quiz.title, subjectName: a.quiz.subject.name }, percent: a.totalPoints ? Math.round((a.score! / a.totalPoints) * 100) : 0, userName: a.user.name || a.user.email })) });
+    }
+
+    // Review: anyone can review their own, or admin can review any
     if (type === 'review') {
       const attemptId = searchParams.get('attemptId'); if (!attemptId) return NextResponse.json({ error: 'Attempt ID is required' }, { status: 400 });
-      const attempt = await db.attempt.findUnique({ where: { id: attemptId }, include: { answers: { include: { question: { include: { choices: true } }, choice: true } }, quiz: true } });
-      if (!attempt || attempt.userId !== user.id) return NextResponse.json({ error: 'Attempt not found' }, { status: 404 });
+      const attempt = await db.attempt.findUnique({ where: { id: attemptId }, include: { answers: { include: { question: { include: { choices: true } }, choice: true } }, quiz: true, user: { select: { id: true, role: true } } } });
+      if (!attempt) return NextResponse.json({ error: 'Attempt not found' }, { status: 404 });
+      // Allow admin to review any attempt, student only their own
+      if (attempt.userId !== user.id && !requireAdmin(user)) return NextResponse.json({ error: 'Not authorized to view this attempt' }, { status: 403 });
       const questions = await db.question.findMany({ where: { quizId: attempt.quizId }, orderBy: { order: 'asc' }, include: { choices: { orderBy: { order: 'asc' } } } });
       const answersMap: Record<string, string | null> = {}; attempt.answers.forEach(a => { answersMap[a.questionId] = a.choiceId; });
       let score = 0; let totalPoints = 0;

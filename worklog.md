@@ -137,3 +137,32 @@ Work Log:
 Stage Summary:
 - All core flows verified end-to-end
 - Registration, admin CRUD, quiz taking, and results all working
+
+---
+Task ID: 9
+Agent: main
+Task: Fix quiz deletion, admin/student separation, Results page, import example
+
+Work Log:
+- Added onDelete: Cascade to Prisma schema (Quiz→Question, Question→Choice, Quiz→Attempt, etc.)
+- Pushed schema with `bun run db:push` — cascade deletes now work
+- Fixed deleteQuiz frontend to check for API errors before showing success toast
+- Fixed deleteSubject to warn about cascading data loss
+- Separated admin/student views: admin goes directly to Teacher Panel, never sees subjects
+- Student sees only Subjects + My Results, no Teacher Panel access
+- Added admin Results view showing all student attempts (type=admin-results endpoint)
+- Admin can review any student's quiz attempt
+- Added GET /api/import?action=example to generate downloadable Excel template
+- Added Download Example button in Import tab with format documentation
+- Fixed regex parsing error in import route
+- Verified quiz deletion works — cascade removes all related questions, attempts, answers
+- Verified student login shows only student UI (My Results, Subjects, Logout)
+- Verified admin login shows only admin UI (Results, Teacher Panel, Logout)
+- Verified student Results page works
+- Verified admin Results page shows "All Student Results"
+
+Stage Summary:
+- Quiz deletion now works correctly with cascade deletes
+- Complete separation between teacher and student views
+- Results page works for both roles
+- Import example template available for download

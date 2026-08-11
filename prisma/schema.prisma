@@ -29,7 +29,7 @@ model Subject {
   updatedAt   DateTime @updatedAt
   userId      String
 
-  user   User    @relation(fields: [userId], references: [id])
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   quizzes Quiz[]
 }
 
@@ -43,7 +43,7 @@ model Quiz {
   updatedAt       DateTime @updatedAt
   subjectId       String
 
-  subject   Subject    @relation(fields: [subjectId], references: [id])
+  subject   Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   questions Question[]
   attempts  Attempt[]
 }
@@ -56,7 +56,7 @@ model Question {
   points    Int      @default(1)
   quizId    String
 
-  quiz    Quiz     @relation(fields: [quizId], references: [id])
+  quiz    Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
   choices Choice[]
   answers Answer[]
 }
@@ -68,7 +68,7 @@ model Choice {
   order      Int      @default(0)
   questionId String
 
-  question Question @relation(fields: [questionId], references: [id])
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
   answers  Answer[]
 }
 
@@ -83,8 +83,8 @@ model Attempt {
   quizId      String
   userId      String
 
-  quiz    Quiz     @relation(fields: [quizId], references: [id])
-  user    User     @relation(fields: [userId], references: [id])
+  quiz    Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   answers Answer[]
 }
 
@@ -95,7 +95,7 @@ model Answer {
   choiceId   String?
   createdAt  DateTime @default(now())
 
-  attempt  Attempt  @relation(fields: [attemptId], references: [id])
-  question Question @relation(fields: [questionId], references: [id])
+  attempt  Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
   choice   Choice?  @relation(fields: [choiceId], references: [id])
 }
