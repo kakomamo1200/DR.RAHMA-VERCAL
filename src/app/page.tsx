@@ -954,15 +954,21 @@ export default function QuizBank() {
                     {reviewData.questions.map((q, qi) => {
                       const isCorrect = q.picked === q.correct;
                       return (
-                        <div key={q.id} className={`bg-card border rounded-xl p-4 ${!isCorrect ? "border-red-400 bg-red-50/30" : "border-border"}`}>
-                          {!isCorrect && (
-                            <div className="text-xs font-bold uppercase tracking-wide mb-2 text-red-600">
-                              {q.picked === null ? "⚠ لم تتم الإجابة / No answer" : "✗ إجابة خاطئة / Incorrect"}
-                            </div>
-                          )}
+                        <div key={q.id} className={`bg-card border rounded-xl p-4 transition-all ${
+                          !isCorrect 
+                            ? "border-red-300 bg-red-50/40 shadow-sm" 
+                            : "border-green-300 bg-green-50/20 shadow-sm"
+                        }`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                              isCorrect ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                            }`}>
+                              {isCorrect ? "✓ إجابة صحيحة / Correct" : (q.picked === null ? "⚠ لم تتم الإجابة / No Answer" : "✗ إجابة خاطئة / Incorrect")}
+                            </span>
+                          </div>
 
                           {q.passage && (
-                            <div className="mb-3 p-3 rounded-lg bg-white/80 border text-xs leading-relaxed">
+                            <div className="mb-3 p-3 rounded-lg bg-white/90 border text-xs leading-relaxed">
                               <span className="font-bold text-primary block mb-1">Passage / قطعة:</span>
                               <p className="whitespace-pre-wrap">{q.passage}</p>
                             </div>
@@ -975,17 +981,26 @@ export default function QuizBank() {
                           )}
 
                           <div className="flex items-start gap-2 mb-3">
-                            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-secondary text-primary text-xs font-bold shrink-0">{qi + 1}</span>
+                            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold shrink-0">{qi + 1}</span>
                             <p className="font-medium text-sm">{q.text}</p>
                           </div>
-                          <div className="space-y-1.5 ml-8">
+                          <div className="space-y-2 ml-8">
                             {q.choices.map((c, ci) => {
+                              const isIsCorrectChoice = ci === q.correct;
                               const isPickedWrong = ci === q.picked && !isCorrect;
+                              
+                              let choiceStyle = "bg-secondary/40 text-muted-foreground border-transparent";
+                              if (isIsCorrectChoice) {
+                                choiceStyle = "bg-green-100/90 border-green-400 text-green-800 font-bold shadow-xs";
+                              } else if (isPickedWrong) {
+                                choiceStyle = "bg-red-100/90 border-red-400 text-red-700 font-medium line-through";
+                              }
+
                               return (
-                                <div key={c.id} className={`p-2.5 rounded-lg text-sm ${
-                                  isPickedWrong ? "line-through text-red-600 bg-red-100 font-medium" : "text-foreground"
-                                }`}>
-                                  {String.fromCharCode(65 + ci)}) {c.text}{isPickedWrong ? " ✗" : ""}
+                                <div key={c.id} className={`p-2.5 rounded-lg text-sm border flex items-center justify-between transition-all ${choiceStyle}`}>
+                                  <span>{String.fromCharCode(65 + ci)}) {c.text}</span>
+                                  {isIsCorrectChoice && <span className="text-xs font-extrabold text-green-700 bg-green-200/60 px-2 py-0.5 rounded">✓ الإجابة الصحيحة</span>}
+                                  {isPickedWrong && <span className="text-xs font-bold text-red-700 bg-red-200/60 px-2 py-0.5 rounded no-underline">✗ إجابتك الخاطئة</span>}
                                 </div>
                               );
                             })}
