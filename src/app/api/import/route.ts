@@ -196,15 +196,10 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
   // Extract Answer Key map from tables/lists at the end
   const answerKeyMap = extractAnswerKeyMapFromHtml(fullHtml);
 
-  // 1. Direct Deterministic Parser (100% reliable, zero AI hallucinations, preserves all 30/41 questions)
-  const deterministicResult = await parseWordFileDeterministic(html, answerKeyMap);
+  // Strip Answer Key section completely from HTML before parsing questions
+  const html = fullHtml.replace(/<(?:p|h\d|div|tr)[^>]*>\s*(?:Answer Key|مفتاح الإجابات|إجابات الاختبار|نموذج الإجابة)[\s\S]*/i, '');
 
-  // If deterministic parser extracted questions successfully (>= 3 questions), use it immediately!
-  if (deterministicResult.questions.length >= 3) {
-    return deterministicResult;
-  }
-
-  // 2. Fallback to Gemini AI API only if deterministic parser found fewer than 3 questions
+  // 1. PRIMARY: Gemini AI API Parser
   const apiKey = process.env.GEMINI_API_KEY;
   if (apiKey) {
     try {
