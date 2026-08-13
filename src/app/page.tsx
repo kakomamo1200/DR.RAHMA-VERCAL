@@ -1889,6 +1889,8 @@ export default function QuizBank() {
             <Button variant="outline" onClick={() => setPreviewDialog(false)}>Close Preview</Button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+
       {/* ===== Analytics Dialog ===== */}
       <Dialog open={analyticsDialog} onOpenChange={setAnalyticsDialog}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
