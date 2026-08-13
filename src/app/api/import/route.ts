@@ -95,14 +95,14 @@ function parseSingleQuestionBuffer(
   }
 
   const hasExplicitAsterisk = lines.some(l => l.startsWith('*') || l.includes('[CORRECT]'));
-  let finalQText = questionTextLines.join(' ').replace(/\[\/?(?:QUESTION|سؤال|Q|TRUE_FALSE|صح_خطأ)\]/gi, '').trim();
+  let finalQText = questionTextLines.join(' ').replace(/\[\/?(?:QUESTION|سؤال|Q|TRUE_FALSE|صح_خطأ|CORRECT|CHOICE|صورة|IMAGE)\]/gi, '').replace(/\[\/?.*?\]/gi, '').trim();
   if (!finalQText && lines[0]) finalQText = lines[0];
 
   if (!finalQText) return;
 
   if (isTF || choices.length < 2) {
     questionsList.push({
-      text: finalQText.replace(/\b(T\/F|True\/False|صح\/خطأ|صح_خطأ)\b/gi, '').trim(),
+      text: finalQText.replace(/\b(T\/F|True\/False|صح\/خطأ|صح_خطأ)\b/gi, '').replace(/\[\/?.*?\]/gi, '').trim(),
       passage,
       type: 'true_false',
       imageUrl: image,
@@ -210,6 +210,12 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
     const passageMatch = textContent.match(/^(?:\[(?:Passage|قطعة|النص)\]|\b(?:Passage|قطعة|النص)\s*[:：])\s*(.+)/i);
     if (passageMatch) {
       currentPassage = passageMatch[1].trim();
+      continue;
+    }
+
+    const lowerText = textContent.toLowerCase();
+    const isJustTag = /^\[\/?.*?\]$/.test(textContent.trim());
+    if (lowerText === 'صورة' || lowerText === 'image' || lowerText === 'img' || /^\d+$/.test(textContent) || textContent.length < 3 || isJustTag) {
       continue;
     }
 

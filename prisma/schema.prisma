@@ -103,3 +103,12 @@ model Answer {
   question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
   choice   Choice?  @relation(fields: [choiceId], references: [id])
 }
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}

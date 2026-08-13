@@ -77,6 +77,11 @@ export default function QuizBank() {
   const [authPassword, setAuthPassword] = useState("");
   const [authName, setAuthName] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  // OTP Reset Password States
+  const [resetStep, setResetStep] = useState<1 | 2 | 3>(1);
+  const [resetCode, setResetCode] = useState("");
+  const [resetCodeSentAt, setResetCodeSentAt] = useState<number>(0);
+  const [resetCountdown, setResetCountdown] = useState(0);
 
   // Admin states
   const [adminTab, setAdminTab] = useState("subjects");
@@ -258,29 +263,57 @@ export default function QuizBank() {
     setAuthLoading(false);
   };
 
-  const handleResetPassword = async () => {
-    if (!authEmail.trim() || !authPassword.trim()) {
-      toast.error("Please enter your email and new password");
-      return;
-    }
+  // OTP countdown timer
+  useEffect(() => {
+    if (resetCodeSentAt <= 0) return;
+    const iv = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - resetCodeSentAt) / 1000);
+      const remaining = Math.max(0, 600 - elapsed);
+      setResetCountdown(remaining);
+      if (remaining <= 0) clearInterval(iv);
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [resetCodeSentAt]);
+
+  const handleSendResetCode = async () => {
+    if (!authEmail.trim()) { toast.error("أدخل البريد الإلكتروني / Enter your email"); return; }
     setAuthLoading(true);
     try {
-      const data = await api("/api/auth/reset-password", {
-        method: "POST",
-        body: JSON.stringify({ email: authEmail, newPassword: authPassword }),
-      });
+      const data = await api("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ action: "send-code", email: authEmail }) });
       if (data.success) {
-        toast.success("Password reset successfully! You can now log in.");
-        setAuthMode("login");
-        setAuthPassword("");
-      } else {
-        toast.error(data.error || "Failed to reset password");
-      }
-    } catch {
-      toast.error("Failed to reset password");
-    } finally {
-      setAuthLoading(false);
-    }
+        toast.success("تم إرسال الرمز لبريدك الإلكتروني / Code sent!");
+        setResetStep(2);
+        setResetCodeSentAt(Date.now());
+        setResetCountdown(600);
+      } else { toast.error(data.error || "Failed to send code"); }
+    } catch { toast.error("Failed to send code"); }
+    finally { setAuthLoading(false); }
+  };
+
+  const handleVerifyResetCode = async () => {
+    if (!resetCode.trim()) { toast.error("أدخل الرمز / Enter the code"); return; }
+    setAuthLoading(true);
+    try {
+      const data = await api("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ action: "verify-code", email: authEmail, code: resetCode }) });
+      if (data.success && data.verified) {
+        toast.success("تم التحقق بنجاح / Code verified!");
+        setResetStep(3);
+      } else { toast.error(data.error || "Invalid or expired code"); }
+    } catch { toast.error("Failed to verify code"); }
+    finally { setAuthLoading(false); }
+  };
+
+  const handleResetPassword = async () => {
+    if (!authPassword.trim() || authPassword.length < 4) { toast.error("كلمة المرور يجب أن تكون 4 أحرف على الأقل"); return; }
+    setAuthLoading(true);
+    try {
+      const data = await api("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ action: "reset", email: authEmail, code: resetCode, newPassword: authPassword }) });
+      if (data.success) {
+        toast.success("تم تغيير كلمة المرور بنجاح! / Password changed!");
+        setAuthMode("login"); setAuthPassword(""); setResetCode(""); setResetStep(1);
+      } else { toast.error(data.error || "Failed to reset password"); }
+    } catch { toast.error("Failed to reset password"); }
+    finally { setAuthLoading(false); }
   };
 
   const logout = () => {
@@ -755,21 +788,21 @@ export default function QuizBank() {
                             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                               <span className="flex items-center gap-1"><HelpCircle className="w-3.5 h-3.5" /> {quiz.questionCount} questions</span>
                               <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {quiz.durationMinutes} min</span>
-                              {quiz.startDate && <span className="text-amber-700 font-medium">Starts: {new Date(quiz.startDate).toLocaleDateString()}</span>}
-                              {quiz.endDate && <span className="text-destructive font-medium">Ends: {new Date(quiz.endDate).toLocaleDateString()}</span>}
+                              {quiz.startDate && <span className="text-amber-700 font-medium">📅 يبدأ: {new Date(quiz.startDate).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })}</span>}
+                              {quiz.endDate && <span className="text-destructive font-medium">⏰ ينتهي: {new Date(quiz.endDate).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })}</span>}
                             </div>
                           </div>
                           {quiz.status === "submitted" ? (
                             <Badge variant="secondary" className="bg-green-100 text-green-700 shrink-0">Completed ✓</Badge>
                           ) : isNotStarted ? (
                             <div className="text-right shrink-0">
-                              <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 block mb-1 text-[11px]">Starts: {new Date(quiz.startDate!).toLocaleString()}</Badge>
-                              <Button disabled size="sm" className="opacity-50">Not Started Yet</Button>
+                              <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 block mb-1 text-[11px]">🟡 يبدأ: {new Date(quiz.startDate!).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })}</Badge>
+                              <Button disabled size="sm" className="opacity-50">لم يبدأ بعد</Button>
                             </div>
                           ) : isExpired ? (
                             <div className="text-right shrink-0">
-                              <Badge variant="destructive" className="block mb-1 text-[11px]">Expired: {new Date(quiz.endDate!).toLocaleString()}</Badge>
-                              <Button disabled size="sm" className="opacity-50">Expired</Button>
+                              <Badge variant="destructive" className="block mb-1 text-[11px]">🔴 انتهى: {new Date(quiz.endDate!).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })}</Badge>
+                              <Button disabled size="sm" className="opacity-50">انتهى الوقت</Button>
                             </div>
                           ) : (
                             <Button onClick={() => startQuiz(quiz.id)} size="sm" className="shrink-0 gap-1.5">
@@ -921,12 +954,13 @@ export default function QuizBank() {
                     {reviewData.questions.map((q, qi) => {
                       const isCorrect = q.picked === q.correct;
                       return (
-                        <div key={q.id} className={`bg-card border rounded-xl p-4 ${isCorrect ? "border-green-500 bg-green-50/50" : "border-red-400 bg-red-50/50"}`}>
-                          <div className={`text-xs font-bold uppercase tracking-wide mb-2 ${isCorrect ? "text-green-600" : "text-red-600"}`}>
-                            {isCorrect ? "✓ Correct" : (q.picked === null ? "No answer" : "✗ Incorrect")}
-                          </div>
+                        <div key={q.id} className={`bg-card border rounded-xl p-4 ${!isCorrect ? "border-red-400 bg-red-50/30" : "border-border"}`}>
+                          {!isCorrect && (
+                            <div className="text-xs font-bold uppercase tracking-wide mb-2 text-red-600">
+                              {q.picked === null ? "⚠ لم تتم الإجابة / No answer" : "✗ إجابة خاطئة / Incorrect"}
+                            </div>
+                          )}
 
-                          {/* Reading Passage in Review */}
                           {q.passage && (
                             <div className="mb-3 p-3 rounded-lg bg-white/80 border text-xs leading-relaxed">
                               <span className="font-bold text-primary block mb-1">Passage / قطعة:</span>
@@ -934,7 +968,6 @@ export default function QuizBank() {
                             </div>
                           )}
 
-                          {/* Full-width Image in Review */}
                           {q.imageUrl && (
                             <div className="my-3 w-full rounded-xl overflow-hidden border bg-white flex justify-center items-center p-2">
                               <img src={q.imageUrl} alt="Question image" className="w-full max-h-[450px] object-contain rounded-lg" />
@@ -942,15 +975,20 @@ export default function QuizBank() {
                           )}
 
                           <div className="flex items-start gap-2 mb-3">
-                            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-white text-primary text-xs font-bold shrink-0">{qi + 1}</span>
+                            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-secondary text-primary text-xs font-bold shrink-0">{qi + 1}</span>
                             <p className="font-medium text-sm">{q.text}</p>
                           </div>
                           <div className="space-y-1.5 ml-8">
-                            {q.choices.map((c, ci) => (
-                              <div key={c.id} className={`p-2.5 rounded-lg text-sm ${ci === q.correct ? "font-bold text-green-700 bg-green-100" : ci === q.picked && !isCorrect ? "line-through text-red-600 bg-red-100" : "text-muted-foreground"}`}>
-                                {c.text}{ci === q.correct ? " ✓" : ""}{ci === q.picked && !isCorrect ? " ✗" : ""}
-                              </div>
-                            ))}
+                            {q.choices.map((c, ci) => {
+                              const isPickedWrong = ci === q.picked && !isCorrect;
+                              return (
+                                <div key={c.id} className={`p-2.5 rounded-lg text-sm ${
+                                  isPickedWrong ? "line-through text-red-600 bg-red-100 font-medium" : "text-foreground"
+                                }`}>
+                                  {String.fromCharCode(65 + ci)}) {c.text}{isPickedWrong ? " ✗" : ""}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -1093,39 +1131,88 @@ export default function QuizBank() {
                       <Input placeholder="John Doe" value={authName} onChange={e => setAuthName(e.target.value)} className="mt-1" />
                     </div>
                   )}
-                  <div>
-                    <Label>Email</Label>
-                    <Input type="email" placeholder="you@example.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="mt-1" />
-                  </div>
-                  <div>
-                    <div className="flex justify-between items-center">
-                      <Label>{authMode === "reset" ? "New Password" : "Password"}</Label>
-                      {authMode === "login" && (
-                        <button type="button" onClick={() => setAuthMode("reset")} className="text-xs text-primary font-medium hover:underline">
-                          Forgot? / نسيت السر؟
-                        </button>
-                      )}
-                    </div>
-                    <Input type="password" placeholder="•••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" />
-                  </div>
 
                   {authMode === "reset" ? (
-                    <Button onClick={handleResetPassword} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
-                      {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
-                      Reset Password / تغيير كلمة المرور
-                    </Button>
+                    <div className="space-y-3">
+                      {resetStep === 1 && (
+                        <>
+                          <div>
+                            <Label>البريد الإلكتروني / Email</Label>
+                            <Input type="email" placeholder="you@example.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="mt-1" />
+                          </div>
+                          <Button onClick={handleSendResetCode} disabled={authLoading || !authEmail.trim()} className="w-full gap-2">
+                            {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
+                            📧 إرسال رمز التحقق / Send Code
+                          </Button>
+                        </>
+                      )}
+                      {resetStep === 2 && (
+                        <>
+                          <div className="text-center p-3 bg-primary/5 rounded-lg border border-primary/20">
+                            <p className="text-sm font-medium text-primary">📬 تم إرسال رمز مكون من 6 أرقام إلى:</p>
+                            <p className="text-xs text-muted-foreground mt-1 font-mono">{authEmail}</p>
+                            {resetCountdown > 0 && (
+                              <p className="text-xs text-amber-700 mt-2 font-bold">⏱ ينتهي خلال: {Math.floor(resetCountdown / 60)}:{String(resetCountdown % 60).padStart(2, '0')}</p>
+                            )}
+                          </div>
+                          <div>
+                            <Label>رمز التحقق / Verification Code</Label>
+                            <Input type="text" placeholder="123456" value={resetCode} onChange={e => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))} className="mt-1 text-center text-2xl font-mono tracking-[0.5em] font-bold" maxLength={6} />
+                          </div>
+                          <Button onClick={handleVerifyResetCode} disabled={authLoading || resetCode.length !== 6} className="w-full gap-2">
+                            {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
+                            ✅ تحقق من الرمز / Verify Code
+                          </Button>
+                          <button type="button" onClick={() => { setResetStep(1); setResetCode(""); }} className="text-xs text-muted-foreground hover:underline w-full text-center">
+                            ← إعادة إرسال أو تغيير الإيميل
+                          </button>
+                        </>
+                      )}
+                      {resetStep === 3 && (
+                        <>
+                          <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200">
+                            <p className="text-sm font-medium text-green-700">✅ تم التحقق بنجاح! أدخل كلمة المرور الجديدة</p>
+                          </div>
+                          <div>
+                            <Label>كلمة المرور الجديدة / New Password</Label>
+                            <Input type="password" placeholder="•••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" />
+                          </div>
+                          <Button onClick={handleResetPassword} disabled={authLoading || authPassword.length < 4} className="w-full gap-2">
+                            {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
+                            🔐 تغيير كلمة المرور / Reset Password
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   ) : (
-                    <Button onClick={handleAuth} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
-                      {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
-                      {authRole === "teacher" ? "Sign In as Teacher" : authMode === "login" ? "Sign In" : "Create Account"}
-                    </Button>
+                    <>
+                      <div>
+                        <Label>Email</Label>
+                        <Input type="email" placeholder="you@example.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="mt-1" />
+                      </div>
+                      <div>
+                        <div className="flex justify-between items-center">
+                          <Label>Password</Label>
+                          {authMode === "login" && (
+                            <button type="button" onClick={() => { setAuthMode("reset"); setResetStep(1); setResetCode(""); }} className="text-xs text-primary font-medium hover:underline">
+                              نسيت كلمة السر؟ / Forgot?
+                            </button>
+                          )}
+                        </div>
+                        <Input type="password" placeholder="•••••••" value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="mt-1" />
+                      </div>
+                      <Button onClick={handleAuth} disabled={authLoading || !authEmail || !authPassword} className="w-full gap-2">
+                        {authLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
+                        {authRole === "teacher" ? "Sign In as Teacher" : authMode === "login" ? "Sign In" : "Create Account"}
+                      </Button>
+                    </>
                   )}
                 </div>
 
                 <div className="mt-4 text-center text-sm space-y-1">
                   {authMode === "reset" ? (
-                    <button onClick={() => setAuthMode("login")} className="text-primary font-semibold hover:underline text-xs">
-                      Back to Sign In / العودة لتسجيل الدخول
+                    <button onClick={() => { setAuthMode("login"); setResetStep(1); setResetCode(""); }} className="text-primary font-semibold hover:underline text-xs">
+                      ← العودة لتسجيل الدخول / Back to Sign In
                     </button>
                   ) : authRole === "student" ? (
                     <button onClick={() => setAuthMode(authMode === "login" ? "register" : "login")} className="text-primary font-semibold hover:underline">
@@ -1202,8 +1289,8 @@ export default function QuizBank() {
                                   <h4 className="font-semibold text-sm">{q.title}</h4>
                                   <p className="text-xs text-muted-foreground">
                                     {q.questionCount} questions • {q.durationMinutes} min • {q.attemptCount} attempt{q.attemptCount === 1 ? "" : "s"}
-                                    {q.startDate && <span className="ml-2 text-amber-700 font-medium">Starts: {new Date(q.startDate).toLocaleDateString()}</span>}
-                                    {q.endDate && <span className="ml-2 text-destructive font-medium">Ends: {new Date(q.endDate).toLocaleDateString()}</span>}
+                                    {q.startDate && <span className="ml-2 text-amber-700 font-medium">📅 يبدأ: {new Date(q.startDate).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })}</span>}
+                                    {q.endDate && <span className="ml-2 text-destructive font-medium">⏰ ينتهي: {new Date(q.endDate).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })}</span>}
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-1">
