@@ -1517,22 +1517,19 @@ export default function QuizBank() {
 
                       <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg space-y-2">
                         <p className="font-bold text-foreground text-xs text-primary flex items-center gap-1">
-                          📄 1. تنسيق ملف وورد Word (.docx) التلقائي — بالرموز والعلامات:
+                          📄 1. ملف وورد Word (.docx) الطبيعي أو التلقائي:
                         </p>
                         <div className="bg-background p-2.5 rounded-md border font-mono text-[11px] space-y-1 text-foreground">
-                          <p className="text-amber-700">[قطعة] اقرأ الحالة الطبية التالية ثم أجب عن الأسئلة... [/قطعة]</p>
-                          <p className="text-blue-700">[صورة] (ضع الصورة هنا من جهازك مباشرة في الوورد)</p>
-                          <p className="text-emerald-700 font-bold">[سؤال]</p>
-                          <p className="text-muted-foreground">ما هو العضو الأكبر في جسم الإنسان؟</p>
-                          <p className="text-muted-foreground">A) الكبد</p>
-                          <p className="text-green-700 font-bold">*B) الجلد  (وضع نجمة * يحدد الإجابة الصحيحة!)</p>
-                          <p className="text-muted-foreground">C) المخ</p>
-                          <p className="text-muted-foreground">D) القلب</p>
-                          <p className="text-emerald-700 font-bold">[/سؤال]</p>
-                          <p className="text-purple-700 font-bold">[صح_خطأ] يتكون القلب البشري من 4 حجرات. *صح [/صح_خطأ]</p>
+                          <p className="text-muted-foreground font-bold">1. What insulates neuronal axons in the CNS?</p>
+                          <p className="text-muted-foreground">A) Schwann cells</p>
+                          <p className="text-green-700 font-bold">B) Oligodendrocytes</p>
+                          <p className="text-muted-foreground">C) Astrocytes</p>
+                          <p className="text-muted-foreground">D) Microglia</p>
+                          <p className="text-purple-700 font-bold">2. Oligodendrocytes myelinate axons in PNS. (True / False)</p>
+                          <p className="text-blue-700 font-bold mt-2">Answer Key: 1. B  2. False</p>
                         </div>
                         <p className="text-[11px] text-muted-foreground">
-                          💡 <span className="font-bold text-foreground">الترتيب التلقائي:</span> تأتي القطعة أولاً، ثم الصورة، ثم السؤال والخيارات، وتوضع النجمة <code className="bg-secondary px-1 rounded text-primary">*</code> قبل الخيار الصحيح!
+                          💡 <span className="font-bold text-foreground">ملاحظة:</span> يمكنك كتابة الأسئلة بشكل طبيعي ووضع جدول <code className="bg-secondary px-1 rounded text-primary">Answer Key</code> في آخر الوورد، أو استخدام الرموز <code className="bg-secondary px-1 rounded text-primary">[سؤال]</code> و <code className="bg-secondary px-1 rounded text-primary">*B)</code> للملفات المعقدة.
                         </p>
                       </div>
 
@@ -1541,7 +1538,7 @@ export default function QuizBank() {
                           📊 2. ملف إكسيل Excel (.xlsx):
                         </p>
                         <p className="text-muted-foreground">
-                          • أسماء الأعمدة: <code className="bg-secondary px-1 rounded text-primary font-mono">question</code>, <code className="bg-secondary px-1 rounded text-primary font-mono">choice1</code> .. <code className="bg-secondary px-1 rounded text-primary font-mono">choice4</code>, <code className="bg-secondary px-1 rounded text-primary font-mono">correct</code>, <code className="bg-secondary px-1 rounded text-primary font-mono">passage</code>, <code className="bg-secondary px-1 rounded text-primary font-mono">image</code>.
+                          • اضغط على زر <code className="bg-secondary px-1.5 py-0.5 rounded text-primary font-bold">Download Example</code> لتحميل ملف Excel جاهز بالخانات والخيارات والحالات المرضية المعبأة.
                         </p>
                       </div>
                     </div>
