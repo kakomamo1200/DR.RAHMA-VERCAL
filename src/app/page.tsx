@@ -166,7 +166,6 @@ export default function QuizBank() {
       api("/api/auth/me").then((data) => {
         if (data.user) {
           setUser(data.user);
-          // Admin goes directly to Teacher Panel
           if (data.user.role === "admin") {
             setView("admin");
           }
@@ -178,6 +177,31 @@ export default function QuizBank() {
     } else {
       setLoading(false);
     }
+  }, []);
+
+  // Synchronize auth state across browser tabs & sessions
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "quiz_token" || e.key === "auth_status") {
+        const token = localStorage.getItem("quiz_token");
+        if (!token) {
+          setUser(null);
+          setView("home");
+        } else {
+          api("/api/auth/me").then((data) => {
+            if (data.user) {
+              setUser(data.user);
+              if (data.user.role === "admin") setView("admin");
+            } else {
+              setUser(null);
+              setView("home");
+            }
+          });
+        }
+      }
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   // Load subjects
@@ -574,7 +598,7 @@ export default function QuizBank() {
     setImportLoading(false);
   };
 
-  // Download import example
+  // Download import example (Excel)
   const downloadExample = () => {
     const a = document.createElement("a");
     a.href = "/api/import?action=example";
@@ -582,7 +606,18 @@ export default function QuizBank() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    toast.success("Downloading example template...");
+    toast.success("Downloading Excel example template...");
+  };
+
+  // Download import example (Word .docx)
+  const downloadExampleWord = () => {
+    const a = document.createElement("a");
+    a.href = "/api/import?format=word";
+    a.download = "quiz-template-example.docx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    toast.success("Downloading Word (.docx) example template...");
   };
 
   // Navigation helpers
@@ -1496,19 +1531,24 @@ export default function QuizBank() {
                     <p className="text-sm text-muted-foreground">Upload a Word (.docx) or Excel (.xlsx) file to auto-import questions</p>
                   </div>
 
-                  {/* Download Example Button */}
+                  {/* Download Example Buttons */}
                   <Card className="p-4 mb-4 bg-primary/5 border-primary/20">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
-                        <Download className="w-5 h-5 text-primary" />
+                        <Download className="w-5 h-5 text-primary shrink-0" />
                         <div>
                           <p className="text-sm font-semibold">Need an example template?</p>
-                          <p className="text-xs text-muted-foreground">Download a sample Excel file showing the expected format</p>
+                          <p className="text-xs text-muted-foreground">Download sample Word (.docx) or Excel (.xlsx) templates ready for upload</p>
                         </div>
                       </div>
-                      <Button size="sm" variant="outline" onClick={downloadExample} className="gap-1.5 shrink-0">
-                        <Download className="w-4 h-4" /> Download Example
-                      </Button>
+                      <div className="flex gap-2 w-full sm:w-auto">
+                        <Button size="sm" variant="outline" onClick={downloadExampleWord} className="gap-1.5 flex-1 sm:flex-initial">
+                          <FileText className="w-4 h-4 text-blue-600" /> Word (.docx)
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={downloadExample} className="gap-1.5 flex-1 sm:flex-initial">
+                          <FileSpreadsheet className="w-4 h-4 text-green-600" /> Excel (.xlsx)
+                        </Button>
+                      </div>
                     </div>
                     <div className="mt-3 p-3 bg-background rounded-lg text-xs text-muted-foreground space-y-2 border">
                       <p className="font-semibold text-foreground text-sm flex items-center gap-1.5 text-primary">

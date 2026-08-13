@@ -695,9 +695,110 @@ async function parseExcelFile(buffer: Buffer): Promise<{ questions: ParsedQuesti
   return { questions };
 }
 
-// GET: Stream example file directly as attachment
-export async function GET() {
+// Generate example Word (.docx) file buffer
+async function generateWordExampleBuffer(): Promise<Buffer> {
+  const zip = new JSZip();
+
+  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`);
+
+  zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`);
+
+  zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>`);
+
+  const escapeXml = (str: string) => (str || '').replace(/[<>&'"]/g, (c) => {
+    switch (c) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+      case '\'': return '&apos;';
+      case '"': return '&quot;';
+    }
+    return c;
+  });
+
+  const title = 'NEUROPHYSIOLOGY & NCS — SAMPLE QUIZ TEMPLATE';
+  const subtitle = 'Standard Word Quiz Format Template — Dr. Rahma Quiz Bank';
+
+  let bodyXml = `<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/><w:color w:val="1E3A8A"/></w:rPr><w:t>${escapeXml(title)}</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:rPr><w:i/><w:color w:val="666666"/></w:rPr><w:t>${escapeXml(subtitle)}</w:t></w:r></w:p>`;
+  bodyXml += `<w:p/>`;
+
+  bodyXml += `<w:p><w:r><w:rPr><w:b/><w:color w:val="1E3A8A"/></w:rPr><w:t>Section A — Multiple Choice Questions (Q1–Q2)</w:t></w:r></w:p>`;
+
+  // Q1
+  bodyXml += `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>1. What insulates neuronal axons in the central nervous system (CNS)?</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>A) Schwann cells</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>B) Oligodendrocytes</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>C) Astrocytes</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>D) Microglia</w:t></w:r></w:p>`;
+  bodyXml += `<w:p/>`;
+
+  // Q2
+  bodyXml += `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>2. Saltatory conduction refers to:</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>A) Continuous conduction along the entire axon membrane</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>B) Action potentials jumping from node to node</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>C) Conduction that occurs only in unmyelinated fibers</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>D) Backward propagation of the action potential</w:t></w:r></w:p>`;
+  bodyXml += `<w:p/>`;
+
+  bodyXml += `<w:p><w:r><w:rPr><w:b/><w:color w:val="1E3A8A"/></w:rPr><w:t>Section B — True / False Questions (Q3–Q4)</w:t></w:r></w:p>`;
+
+  // Q3
+  bodyXml += `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>3. Oligodendrocytes myelinate axons in the peripheral nervous system (PNS). (True / False)</w:t></w:r></w:p>`;
+  bodyXml += `<w:p/>`;
+
+  // Q4
+  bodyXml += `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>4. Saltatory conduction increases the speed of impulse conduction along myelinated axons. (True / False)</w:t></w:r></w:p>`;
+  bodyXml += `<w:p/>`;
+
+  bodyXml += `<w:p><w:r><w:rPr><w:b/><w:color w:val="1E3A8A"/></w:rPr><w:t>Section C — Clinical Case Scenarios (Q5)</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:rPr><w:b/><w:color w:val="B45309"/></w:rPr><w:t>Case 1: A 45-year-old man presents with tingling and burning sensations in both feet. A full nerve conduction study of lower limbs shows normal results.</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>5. What is the most likely explanation for normal NCS findings despite his symptoms?</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>A) The nerve conduction study must have been performed incorrectly</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>B) His symptoms are due to a lesion affecting small Aδ and C fibers</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>C) He has no nerve pathology of any kind</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>D) The stimulation current used was supramaximal</w:t></w:r></w:p>`;
+  bodyXml += `<w:p/>`;
+
+  // Answer Key Section
+  bodyXml += `<w:p><w:r><w:rPr><w:b/><w:sz w:val="28"/><w:color w:val="1E3A8A"/></w:rPr><w:t>Answer Key</w:t></w:r></w:p>`;
+  bodyXml += `<w:p><w:r><w:t>1. B   2. B   3. False   4. True   5. B</w:t></w:r></w:p>`;
+
+  zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    ${bodyXml}
+  </w:body>
+</w:document>`);
+
+  return await zip.generateAsync({ type: 'nodebuffer' });
+}
+
+export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const format = searchParams.get('format') || searchParams.get('type') || searchParams.get('action');
+
+    if (format === 'word' || format === 'docx') {
+      const buf = await generateWordExampleBuffer();
+      return new NextResponse(buf, {
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Disposition': 'attachment; filename="quiz-template-example.docx"',
+        },
+      });
+    }
+
     const buf = await generateExampleBuffer();
     return new NextResponse(buf, {
       headers: {
