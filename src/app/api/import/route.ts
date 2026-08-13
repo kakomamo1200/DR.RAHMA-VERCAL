@@ -70,7 +70,7 @@ function parseSingleQuestionBuffer(
   const lines = rawBuffer.split('\n').map(l => l.trim()).filter(Boolean);
   if (lines.length === 0) return;
 
-  const isTF = /\b(T\/F|True\/False|صح\/خطأ|صح_خطأ|TRUE_FALSE)\b/i.test(rawBuffer) || /\[(?:TRUE_FALSE|صح_خطأ)\]/i.test(rawBuffer);
+  const isTF = /\b(T\/F|True\s*\/\s*False|صح\s*\/\s*خطأ|صح_خطأ|TRUE_FALSE)\b/i.test(rawBuffer) || /\[(?:TRUE_FALSE|صح_خطأ)\]/i.test(rawBuffer) || /\(True\s*\/\s*False\)/i.test(rawBuffer);
 
   const choices: { text: string; isCorrect: boolean }[] = [];
   const questionTextLines: string[] = [];
@@ -125,7 +125,7 @@ function parseSingleQuestionBuffer(
     }
 
     questionsList.push({
-      text: finalQText.replace(/\b(T\/F|True\/False|صح\/خطأ|صح_خطأ)\b/gi, '').trim(),
+      text: finalQText.replace(/\(?\b(T\/F|True\s*\/\s*False|صح\s*\/\s*خطأ|صح_خطأ)\b\)?/gi, '').trim(),
       passage,
       type: 'true_false',
       imageUrl: image,
@@ -161,7 +161,7 @@ function extractAnswerKeyMapFromHtml(html: string): Record<number, string> {
   const akSectionMatch = html.match(/(?:Answer Key|مفتاح الإجابات|إجابات الاختبار|نموذج الإجابة)[\s\S]*/i);
   if (akSectionMatch) {
     const akText = akSectionMatch[0].replace(/<[^>]+>/g, ' ');
-    const matches = akText.matchAll(/(\d+)\s*[\.\-:\s]\s*([A-Ea-eأ-د]|True|False|صح|خطأ)/gi);
+    const matches = akText.matchAll(/(\d+)\s*[\.\-:\t\s]+\s*([A-Ea-eأ-د]|True|False|صح|خطأ)/gi);
     for (const m of matches) {
       const qNum = parseInt(m[1]);
       if (qNum > 0 && qNum < 300) {
@@ -448,6 +448,19 @@ async function parseWordFileDeterministic(html: string, answerKeyMap: Record<num
     const lowerText = textContent.toLowerCase();
     const isJustTag = /^\[\/?.*?\]$/.test(textContent.trim());
     if (lowerText === 'صورة' || lowerText === 'image' || lowerText === 'img' || isJustTag) {
+      continue;
+    }
+
+    // Skip document banners & section headers (e.g. "Section A — Multiple Choice", "Section B — True/False")
+    if (/^Section\s+[A-D]\s*—/i.test(textContent) || /^NEUROPHYSIOLOGY/i.test(textContent) || /^Quiz\s*—/i.test(textContent) || /^\d+\s*questions\s*•/i.test(textContent)) {
+      flushQuestion();
+      continue;
+    }
+
+    // Case scenarios passage header (e.g. "Case 1", "Case 2")
+    if (/^Case\s+\d+/i.test(textContent)) {
+      flushQuestion();
+      currentPassage = textContent;
       continue;
     }
 
