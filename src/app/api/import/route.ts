@@ -78,8 +78,8 @@ function parseSingleQuestionBuffer(
   for (const line of lines) {
     if (/^\[\/?(?:TRUE_FALSE|صح_خطأ|QUESTION|سؤال|Q|PASSAGE|قطعة|النص|CORRECT|CHOICE|صورة|IMAGE)\]$/i.test(line)) continue;
 
-    // Choice patterns: MUST match letters (A, B, C, D, E, أ, ب, ج, د), NOT pure digits (1, 2, 3)
-    const choiceMatch = line.match(/^(?:\*|\[CORRECT\])?\s*(?:\(?([A-Ea-eأ-د])\)?[\.\-:\s]+|\*|\[CHOICE\]\s*)(.+)/i);
+    // Choice patterns: MUST match letter followed by punctuation (. - : )), NOT spaces alone!
+    const choiceMatch = line.match(/^(?:\*|\[CORRECT\])?\s*(?:\(?([A-Ea-eأ-د])\)?[\.\-:)]+|\*|\[CHOICE\]\s*)(.+)/i);
     const hasAsterisk = line.startsWith('*') || line.includes('[CORRECT]') || line.includes('✔') || /\((?:صح|صحيحة|correct)\)/i.test(line);
 
     if (choiceMatch && choiceMatch[2]) {
@@ -100,6 +100,7 @@ function parseSingleQuestionBuffer(
   }
 
   let finalQText = questionTextLines.join(' ')
+    .replace(/^Case\s+Scenario\s*/i, '')
     .replace(/\[\/?(?:QUESTION|سؤال|Q|TRUE_FALSE|صح_خطأ|CORRECT|CHOICE|صورة|IMAGE|PASSAGE|قطعة|النص)\]/gi, '')
     .replace(/\[\/?.*?\]/gi, '')
     .trim();
@@ -114,7 +115,7 @@ function parseSingleQuestionBuffer(
 
   const hasExplicitCorrect = choices.some(c => c.isCorrect);
 
-  if (isTF) {
+  if (isTF || choices.length < 2) {
     let tfCorrectIndex = 0;
     if (hasExplicitCorrect) {
       const correctChoiceIndex = choices.findIndex(c => c.isCorrect);
@@ -134,7 +135,7 @@ function parseSingleQuestionBuffer(
         { text: 'خطأ', isCorrect: tfCorrectIndex === 1 }
       ]
     });
-  } else if (choices.length >= 2) {
+  } else {
     // MCQ format
     const filteredChoices = choices
       .filter(c => c.text && c.text.toLowerCase() !== finalQText.toLowerCase())
