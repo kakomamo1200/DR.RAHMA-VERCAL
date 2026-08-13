@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
       }
       const attempt = await db.attempt.create({ data: { quizId, userId: user.id, startedAt: new Date() } });
       const questions = await db.question.findMany({ where: { quizId }, orderBy: { order: 'asc' }, include: { choices: { orderBy: { order: 'asc' } } } });
-      return NextResponse.json({ status: 'started', attemptId: attempt.id, startedAt: attempt.startedAt.getTime(), serverNow: Date.now(), durationMin: quiz.durationMinutes, questions: questions.map(q => ({ id: q.id, text: q.text, passage: q.passage || null, type: q.type || 'mcq', imageUrl: q.imageUrl, points: q.points, choices: q.choices.map(c => c.text) })), answers: questions.map(() => null) });
+      return NextResponse.json({ status: 'started', attemptId: attempt.id, startedAt: attempt.startedAt.getTime(), serverNow: Date.now(), durationMin: quiz.durationMinutes, shuffleQuestions: quiz.shuffleQuestions, questions: questions.map(q => ({ id: q.id, text: q.text, passage: q.passage || null, type: q.type || 'mcq', imageUrl: q.imageUrl, points: q.points, choices: q.choices.map(c => c.text) })), answers: questions.map(() => null) });
     }
 
     if (action === 'save') {

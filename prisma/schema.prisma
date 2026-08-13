@@ -38,6 +38,7 @@ model Quiz {
   title           String
   description     String?
   durationMinutes Int      @default(40)
+  shuffleQuestions Boolean  @default(true)
   startDate       DateTime?
   endDate         DateTime?
   order           Int      @default(0)

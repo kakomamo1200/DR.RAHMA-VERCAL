@@ -19,16 +19,16 @@ export async function GET(request: NextRequest) {
         }
       });
     }
-    return NextResponse.json({ quizzes: quizzes.map(q => ({ id: q.id, title: q.title, description: q.description, durationMinutes: q.durationMinutes, startDate: q.startDate, endDate: q.endDate, questionCount: q._count.questions, attemptCount: q._count.attempts, subjectName: q.subject.name, order: q.order, status: attemptStatuses[q.id] || null })) });
+    return NextResponse.json({ quizzes: quizzes.map(q => ({ id: q.id, title: q.title, description: q.description, durationMinutes: q.durationMinutes, shuffleQuestions: q.shuffleQuestions, startDate: q.startDate, endDate: q.endDate, questionCount: q._count.questions, attemptCount: q._count.attempts, subjectName: q.subject.name, order: q.order, status: attemptStatuses[q.id] || null })) });
   } catch (error) { console.error('Quizzes GET error:', error); return NextResponse.json({ error: 'Something went wrong' }, { status: 500 }); }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const user = await getUserFromRequest(request); if (!user || !requireAdmin(user)) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    const { title, description, durationMinutes, startDate, endDate, subjectId, order } = await request.json();
+    const { title, description, durationMinutes, shuffleQuestions, startDate, endDate, subjectId, order } = await request.json();
     if (!title || !subjectId) return NextResponse.json({ error: 'Title and subject are required' }, { status: 400 });
-    const quiz = await db.quiz.create({ data: { title, description: description || null, durationMinutes: durationMinutes || 40, startDate: startDate ? new Date(startDate) : null, endDate: endDate ? new Date(endDate) : null, subjectId, order: order ?? 0 } });
+    const quiz = await db.quiz.create({ data: { title, description: description || null, durationMinutes: durationMinutes || 40, shuffleQuestions: shuffleQuestions !== false, startDate: startDate ? new Date(startDate) : null, endDate: endDate ? new Date(endDate) : null, subjectId, order: order ?? 0 } });
     return NextResponse.json({ quiz });
   } catch (error) { console.error('Quizzes POST error:', error); return NextResponse.json({ error: 'Something went wrong' }, { status: 500 }); }
 }
@@ -36,8 +36,8 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const user = await getUserFromRequest(request); if (!user || !requireAdmin(user)) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    const { id, title, description, durationMinutes, startDate, endDate, order } = await request.json(); if (!id) return NextResponse.json({ error: 'Quiz ID is required' }, { status: 400 });
-    const quiz = await db.quiz.update({ where: { id }, data: { title, description, durationMinutes, startDate: startDate ? new Date(startDate) : null, endDate: endDate ? new Date(endDate) : null, order } });
+    const { id, title, description, durationMinutes, shuffleQuestions, startDate, endDate, order } = await request.json(); if (!id) return NextResponse.json({ error: 'Quiz ID is required' }, { status: 400 });
+    const quiz = await db.quiz.update({ where: { id }, data: { title, description, durationMinutes, shuffleQuestions: shuffleQuestions !== undefined ? Boolean(shuffleQuestions) : undefined, startDate: startDate ? new Date(startDate) : null, endDate: endDate ? new Date(endDate) : null, order } });
     return NextResponse.json({ quiz });
   } catch (error) { console.error('Quizzes PUT error:', error); return NextResponse.json({ error: 'Something went wrong' }, { status: 500 }); }
 }

@@ -25,7 +25,7 @@ import { toast } from "sonner";
 // ============ Types ============
 type User = { id: string; email: string; name: string | null; role: string };
 type Subject = { id: string; name: string; description: string | null; quizCount: number; pendingQuizzes: number; quizzes: Quiz[] };
-type Quiz = { id: string; title: string; description: string | null; durationMinutes: number; startDate?: string | null; endDate?: string | null; questionCount: number; attemptCount: number; subjectName: string; order: number; status: string | null };
+type Quiz = { id: string; title: string; description: string | null; durationMinutes: number; shuffleQuestions?: boolean; startDate?: string | null; endDate?: string | null; questionCount: number; attemptCount: number; subjectName: string; order: number; status: string | null };
 type QuizQuestion = { id: string; text: string; passage?: string | null; type?: "mcq" | "true_false"; imageUrl: string | null; points: number; choices: string[] };
 type ReviewQuestion = { id: string; text: string; passage?: string | null; type?: "mcq" | "true_false"; imageUrl: string | null; points: number; choices: { id: string; text: string; isCorrect: boolean }[]; correct: number; picked: number | null };
 type AttemptResult = { id: string; score: number; totalPoints: number; startedAt: string; submittedAt: string; quiz: { id: string; title: string; subjectName: string }; percent: number; userName?: string | null };
@@ -103,6 +103,7 @@ export default function QuizBank() {
   const [quizTitle, setQuizTitle] = useState("");
   const [quizDesc, setQuizDesc] = useState("");
   const [quizDuration, setQuizDuration] = useState("40");
+  const [quizShuffleQuestions, setQuizShuffleQuestions] = useState(true);
   const [quizStartDate, setQuizStartDate] = useState("");
   const [quizEndDate, setQuizEndDate] = useState("");
   const [quizSubjectId, setQuizSubjectId] = useState("");
@@ -348,11 +349,13 @@ export default function QuizBank() {
     if (data.error) { toast.error(data.error); return; }
 
     if (data.status === "started" || data.status === "resumed") {
-        // Randomize / Shuffle Questions and Choices for student fairness
-        let shuffledQuestions = data.questions || [];
-        if (data.status === "started") {
-          shuffledQuestions = [...shuffledQuestions].sort(() => Math.random() - 0.5);
-          shuffledQuestions = shuffledQuestions.map((q: any) => {
+        // Randomize / Shuffle Questions and Choices ONLY IF teacher enabled shuffle
+        let questionsToUse = data.questions || [];
+        const shouldShuffle = data.shuffleQuestions !== false;
+
+        if (data.status === "started" && shouldShuffle) {
+          questionsToUse = [...questionsToUse].sort(() => Math.random() - 0.5);
+          questionsToUse = questionsToUse.map((q: any) => {
             if (q.choices && q.choices.length > 0) {
               return { ...q, choices: [...q.choices].sort(() => Math.random() - 0.5) };
             }
@@ -360,7 +363,7 @@ export default function QuizBank() {
           });
         }
 
-        setQuizData({ quiz: { id: quizId, title: data.quiz?.title || "Quiz", description: null, durationMinutes: data.durationMin }, questions: shuffledQuestions });
+        setQuizData({ quiz: { id: quizId, title: data.quiz?.title || "Quiz", description: null, durationMinutes: data.durationMin }, questions: questionsToUse });
         setAttemptId(data.attemptId);
         setQuizAnswers(data.answers || new Array(shuffledQuestions.length).fill(null));
         setMarkedForReview([]);
@@ -449,6 +452,7 @@ export default function QuizBank() {
       title: quizTitle,
       description: quizDesc,
       durationMinutes: parseInt(quizDuration) || 40,
+      shuffleQuestions: quizShuffleQuestions,
       startDate: quizStartDate || null,
       endDate: quizEndDate || null,
       subjectId: quizSubjectId
@@ -1455,6 +1459,7 @@ export default function QuizBank() {
                                     setQuizTitle(q.title);
                                     setQuizDesc(q.description || "");
                                     setQuizDuration(String(q.durationMinutes));
+                                    setQuizShuffleQuestions(q.shuffleQuestions !== false);
                                     setQuizStartDate(formatForDatetimeInput(q.startDate));
                                     setQuizEndDate(formatForDatetimeInput(q.endDate));
                                     setQuizSubjectId(s.id);
@@ -1630,6 +1635,18 @@ export default function QuizBank() {
                 <Label className="text-xs">End Date & Time (optional)</Label>
                 <Input type="datetime-local" value={quizEndDate} onChange={e => setQuizEndDate(e.target.value)} className="mt-1 text-xs" />
               </div>
+            </div>
+            <div className="flex items-center gap-2 pt-2 border-t border-border">
+              <input
+                type="checkbox"
+                id="shuffleToggle"
+                checked={quizShuffleQuestions}
+                onChange={e => setQuizShuffleQuestions(e.target.checked)}
+                className="w-4 h-4 rounded text-primary accent-primary cursor-pointer"
+              />
+              <Label htmlFor="shuffleToggle" className="text-xs cursor-pointer font-medium">
+                🎲 ترتيب عشوائي للأسئلة والخيارات عند أداء الطالب / Shuffle Questions & Choices
+              </Label>
             </div>
           </div>
           <DialogFooter>
