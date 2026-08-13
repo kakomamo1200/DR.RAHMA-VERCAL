@@ -231,14 +231,15 @@ ${textWithMarkers}`;
                   .trim();
 
                 let cleanedChoices: { text: string; isCorrect: boolean }[] = [];
+                const isExplicitTF = q.type === 'true_false' || /\b(T\/F|True\/False|صح\/خطأ|صح_خطأ)\b/i.test(rawQText) || /\b(صح|خطأ|true|false)\b/i.test(rawQText);
 
-                if (q.type === 'true_false' || !Array.isArray(q.choices) || q.choices.length < 2) {
+                if (isExplicitTF) {
                   const isFalseCorrect = Array.isArray(q.choices) && q.choices.some((c: any) => (typeof c === 'string' ? c : c.text).includes('خطأ') && c.isCorrect);
                   cleanedChoices = [
                     { text: 'صح', isCorrect: !isFalseCorrect },
                     { text: 'خطأ', isCorrect: isFalseCorrect }
                   ];
-                } else {
+                } else if (Array.isArray(q.choices) && q.choices.length >= 2) {
                   cleanedChoices = q.choices
                     .map((c: any) => {
                       const rawText = typeof c === 'string' ? c : (c.text || '');
@@ -263,20 +264,25 @@ ${textWithMarkers}`;
                   }
                 }
 
+                // Reject if no valid choices were found
+                if (cleanedChoices.length < 2) {
+                  return null;
+                }
+
                 return {
                   text: cleanQText,
                   passage: q.passage || null,
-                  type: q.type === 'true_false' ? 'true_false' : 'mcq',
+                  type: isExplicitTF ? 'true_false' : 'mcq',
                   imageUrl: imgUrl,
                   choices: cleanedChoices
                 };
               })
-              .filter((q: ParsedQuestion) => {
-                // Strict filter to reject Document Titles, Headers, Metadata, and Answer Key artifacts
-                if (!q.text || q.text.length < 3) return false;
+              .filter((q: ParsedQuestion | null): q is ParsedQuestion => {
+                if (!q || !q.text || q.text.length < 3) return false;
                 const lower = q.text.toLowerCase();
-                if (lower.includes('quiz — lecture') || lower.includes('intro to neurophysiology') || lower.includes('technique of ncs')) return false;
-                if (/^(?:quiz|lecture|chapter|course|instructor|dr\.|answer key|مفتاح الإجابات|إجابات الاختبار|نموذج الإجابة)/i.test(q.text)) return false;
+                // Reject titles, headers, lecture names, instructions, and answer key items
+                if (lower.includes('quiz') || lower.includes('lecture') || lower.includes('intro to') || lower.includes('technique of') || lower.includes('conduction studies')) return false;
+                if (/^(?:quiz|lecture|chapter|course|instructor|dr\.|answer key|مفتاح الإجابات|إجابات الاختبار|نموذج الإجابة|instructions)/i.test(q.text)) return false;
                 if (/^(?:[0-9]{1,3}\s*[\-:\.]\s*[A-Da-dأ-د])\s*$/.test(q.text)) return false; // Answer Key standalone like "1-A"
                 return true;
               });
