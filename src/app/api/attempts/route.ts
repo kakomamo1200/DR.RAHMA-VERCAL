@@ -42,9 +42,40 @@ export async function GET(request: NextRequest) {
     if (type === 'admin-results') {
       if (!requireAdmin(user)) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
       const attempts = await db.attempt.findMany({ where: { submittedAt: { not: null } }, orderBy: { submittedAt: 'desc' }, include: { quiz: { include: { subject: { select: { name: true } } } }, user: { select: { name: true, email: true, role: true } } } });
-      // Filter to show only student attempts (not admin's own test attempts)
       const studentAttempts = attempts.filter(a => a.user.role === 'student');
-      return NextResponse.json({ attempts: studentAttempts.map(a => ({ id: a.id, score: a.score, totalPoints: a.totalPoints, startedAt: a.startedAt, submittedAt: a.submittedAt, quiz: { id: a.quiz.id, title: a.quiz.title, subjectName: a.quiz.subject.name }, percent: a.totalPoints ? Math.round((a.score! / a.totalPoints) * 100) : 0, userName: a.user.name || a.user.email })) });
+      return NextResponse.json({ attempts: studentAttempts.map(a => ({ id: a.id, score: a.score, totalPoints: a.totalPoints, startedAt: a.startedAt, submittedAt: a.submittedAt, quiz: { id: a.quiz.id, title: a.quiz.title, subjectName: a.quiz.subject.name }, percent: a.totalPoints ? Math.round((a.score! / a.totalPoints) * 100) : 0, userName: a.user.name || a.user.email, userEmail: a.user.email })) });
+    }
+
+    // Admin: question-level analytics for a quiz
+    if (type === 'quiz-analytics') {
+      if (!requireAdmin(user)) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      if (!quizId) return NextResponse.json({ error: 'Quiz ID is required' }, { status: 400 });
+
+      const questions = await db.question.findMany({
+        where: { quizId },
+        orderBy: { order: 'asc' },
+        include: { choices: true, answers: { include: { choice: true, attempt: true } } }
+      });
+
+      const analytics = questions.map((q, idx) => {
+        const studentAnswers = q.answers.filter(a => a.attempt.submittedAt !== null);
+        const total = studentAnswers.length;
+        const correct = studentAnswers.filter(a => a.choice?.isCorrect).length;
+        const wrong = total - correct;
+        const rate = total > 0 ? Math.round((correct / total) * 100) : 0;
+        return {
+          questionIndex: idx + 1,
+          id: q.id,
+          text: q.text,
+          totalAnswered: total,
+          correctCount: correct,
+          wrongCount: wrong,
+          accuracyRate: rate,
+          isDifficult: total > 0 && rate < 50
+        };
+      });
+
+      return NextResponse.json({ analytics });
     }
 
     // Review: anyone can review their own, or admin can review any

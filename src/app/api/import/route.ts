@@ -76,17 +76,24 @@ function parseSingleQuestionBuffer(
   const questionTextLines: string[] = [];
 
   for (const line of lines) {
-    if (/\[(?:TRUE_FALSE|صح_خطأ)\]/i.test(line)) continue;
+    // Skip tag markers inside lines
+    if (/^\[\/?(?:TRUE_FALSE|صح_خطأ|QUESTION|سؤال|Q|PASSAGE|قطعة|النص|CORRECT|CHOICE|صورة|IMAGE)\]$/i.test(line)) continue;
 
-    const choiceMatch = line.match(/^(?:\*|\[CORRECT\])?\s*(?:\(?([A-Da-d1-6])\)?[\.\-:\s]+|\*|\[CHOICE\]\s*)(.+)/i);
-    const hasAsterisk = line.startsWith('*') || line.includes('[CORRECT]');
+    // Check if line is a choice
+    // Choice patterns: A), A-, A., (A), أ), أ-, (أ), 1), 1-, * Choice, [CHOICE] Choice
+    const choiceMatch = line.match(/^(?:\*|\[CORRECT\])?\s*(?:\(?([A-Da-dأ-د1-6])\)?[\.\-:\s]+|\*|\[CHOICE\]\s*)(.+)/i);
+    const hasAsterisk = line.startsWith('*') || line.includes('[CORRECT]') || line.includes('✔') || /\((?:صح|صحيحة|correct)\)/i.test(line);
 
     if (choiceMatch && choiceMatch[2]) {
-      const choiceContent = choiceMatch[2].replace(/\[\/?CORRECT\]/gi, '').replace(/\[\/?CHOICE\]/gi, '').trim();
+      const choiceContent = choiceMatch[2]
+        .replace(/\[\/?CORRECT\]/gi, '')
+        .replace(/\[\/?CHOICE\]/gi, '')
+        .replace(/\((?:صح|صحيحة|correct)\)/gi, '')
+        .trim();
       if (choiceContent) {
         choices.push({
           text: choiceContent,
-          isCorrect: hasAsterisk || choices.length === 0
+          isCorrect: hasAsterisk
         });
       }
     } else {
@@ -94,24 +101,48 @@ function parseSingleQuestionBuffer(
     }
   }
 
-  const hasExplicitAsterisk = lines.some(l => l.startsWith('*') || l.includes('[CORRECT]'));
-  let finalQText = questionTextLines.join(' ').replace(/\[\/?(?:QUESTION|سؤال|Q|TRUE_FALSE|صح_خطأ|CORRECT|CHOICE|صورة|IMAGE)\]/gi, '').replace(/\[\/?.*?\]/gi, '').trim();
-  if (!finalQText && lines[0]) finalQText = lines[0];
+  // Clean all residual tags from question text
+  let finalQText = questionTextLines.join(' ')
+    .replace(/\[\/?(?:QUESTION|سؤال|Q|TRUE_FALSE|صح_خطأ|CORRECT|CHOICE|صورة|IMAGE|PASSAGE|قطعة|النص)\]/gi, '')
+    .replace(/\[\/?.*?\]/gi, '')
+    .trim();
 
-  if (!finalQText) return;
+  if (!finalQText && lines[0]) {
+    finalQText = lines[0].replace(/\[\/?.*?\]/gi, '').trim();
+  }
+
+  // Filter out invalid/empty/junk question text
+  if (!finalQText || finalQText.length < 2 || /^صورة|image|img$/i.test(finalQText)) return;
+
+  const hasExplicitCorrect = choices.some(c => c.isCorrect);
 
   if (isTF || choices.length < 2) {
+    // True/False format
+    let tfCorrectIndex = 0; // Default to 'صح'
+    if (hasExplicitCorrect) {
+      const correctChoiceIndex = choices.findIndex(c => c.isCorrect);
+      if (correctChoiceIndex !== -1) {
+        const text = choices[correctChoiceIndex].text;
+        if (/خطأ|false/i.test(text)) tfCorrectIndex = 1;
+      }
+    }
+
     questionsList.push({
-      text: finalQText.replace(/\b(T\/F|True\/False|صح\/خطأ|صح_خطأ)\b/gi, '').replace(/\[\/?.*?\]/gi, '').trim(),
+      text: finalQText.replace(/\b(T\/F|True\/False|صح\/خطأ|صح_خطأ)\b/gi, '').trim(),
       passage,
       type: 'true_false',
       imageUrl: image,
       choices: [
-        { text: 'صح', isCorrect: !hasExplicitAsterisk || choices.find(c => c.text.includes('صح'))?.isCorrect || true },
-        { text: 'خطأ', isCorrect: hasExplicitAsterisk && choices.find(c => c.text.includes('خطأ'))?.isCorrect || false }
+        { text: 'صح', isCorrect: tfCorrectIndex === 0 },
+        { text: 'خطأ', isCorrect: tfCorrectIndex === 1 }
       ]
     });
   } else {
+    // MCQ format: if no choice was explicitly marked correct, default first choice as correct
+    if (!hasExplicitCorrect && choices.length > 0) {
+      choices[0].isCorrect = true;
+    }
+
     questionsList.push({
       text: finalQText,
       passage,
@@ -133,6 +164,7 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
   const html = result.value;
   const questions: ParsedQuestion[] = [];
 
+  // Split HTML by structural tags (<p>, <div>, <tr>, <h1-6>, <img>)
   const blocks = html.split(/(?=<(?:p|div|tr|h\d|img)[^>]*>)/i).filter(b => b.trim());
 
   let pendingImage: string | null = null;
@@ -140,8 +172,29 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
   let inPassageBlock = false;
   let passageBuffer = '';
 
-  let inQuestionBlock = false;
-  let questionBuffer = '';
+  let inTaggedQuestionBlock = false;
+  let questionLinesBuffer: string[] = [];
+
+  const flushQuestion = () => {
+    if (questionLinesBuffer.length > 0) {
+      const rawBuf = questionLinesBuffer.join('\n').trim();
+      if (rawBuf) {
+        parseSingleQuestionBuffer(rawBuf, currentPassage, pendingImage, questions);
+        pendingImage = null;
+      }
+      questionLinesBuffer = [];
+    }
+  };
+
+  const isQuestionHeaderLine = (line: string) => {
+    // Regex for question starters: 1., 1-, 1), (1), س1, سؤال 1, Q1:
+    return /^(?:[Qq]\d*[\.\-:\s]|\(?\d+\)?[\.\-:\s]|س\s*\d+|سؤال\s*\d+)/.test(line.trim()) ||
+           /\[(?:QUESTION|سؤال|Q)\]/i.test(line);
+  };
+
+  const isChoiceLine = (line: string) => {
+    return /^(?:\*|\[CORRECT\])?\s*(?:\(?([A-Da-dأ-د1-6])\)?[\.\-:\s]+|\*|\[CHOICE\])/i.test(line.trim());
+  };
 
   for (const block of blocks) {
     const imgMatch = block.match(/<img[^>]+src="([^"]+)"[^>]*>/i);
@@ -152,8 +205,9 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
     const textContent = block.replace(/<[^>]+>/g, '').trim();
     if (!textContent) continue;
 
-    // Check for Passage Tags: [PASSAGE] or [قطعة]
+    // Passage Tags: [PASSAGE] or [قطعة]
     if (/\[(?:PASSAGE|قطعة|النص)\]/i.test(textContent)) {
+      flushQuestion();
       inPassageBlock = true;
       const contentAfterTag = textContent.replace(/\[(?:PASSAGE|قطعة|النص)\]/i, '').replace(/\[\/(?:PASSAGE|قطعة|النص)\]/i, '').trim();
       if (contentAfterTag) passageBuffer += (passageBuffer ? '\n' : '') + contentAfterTag;
@@ -177,7 +231,6 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
       continue;
     }
 
-    // Check for Passage Clear: [/PASSAGE] or [/قطعة]
     if (/\[\/(?:PASSAGE|قطعة|النص)\]/i.test(textContent)) {
       currentPassage = passageBuffer.trim() || currentPassage;
       inPassageBlock = false;
@@ -185,49 +238,65 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
       continue;
     }
 
-    // Check for Question Block Tags: [QUESTION] or [سؤال] or [Q]
-    if (/\[(?:QUESTION|سؤال|Q)\]/i.test(textContent) || inQuestionBlock) {
-      if (/\[(?:QUESTION|سؤال|Q)\]/i.test(textContent)) {
-        inQuestionBlock = true;
-        questionBuffer = textContent.replace(/\[(?:QUESTION|سؤال|Q)\]/i, '');
-      } else {
-        questionBuffer += '\n' + textContent;
-      }
+    // Question Block Tagging Mode
+    if (/\[(?:QUESTION|سؤال|Q)\]/i.test(textContent)) {
+      flushQuestion();
+      inTaggedQuestionBlock = true;
+      const content = textContent.replace(/\[(?:QUESTION|سؤال|Q)\]/i, '').trim();
+      if (content) questionLinesBuffer.push(content);
 
       if (/\[\/(?:QUESTION|سؤال|Q)\]/i.test(textContent)) {
-        questionBuffer = questionBuffer.replace(/\[\/(?:QUESTION|سؤال|Q)\]/i, '').trim();
-        if (questionBuffer) {
-          parseSingleQuestionBuffer(questionBuffer, currentPassage, pendingImage, questions);
-          pendingImage = null;
-        }
-        inQuestionBlock = false;
-        questionBuffer = '';
+        flushQuestion();
+        inTaggedQuestionBlock = false;
       }
       continue;
     }
 
-    // Fallback: Natural Paragraph Parsing (if teacher didn't use tags)
+    if (inTaggedQuestionBlock) {
+      if (/\[\/(?:QUESTION|سؤال|Q)\]/i.test(textContent)) {
+        const content = textContent.replace(/\[\/(?:QUESTION|سؤال|Q)\]/i, '').trim();
+        if (content) questionLinesBuffer.push(content);
+        flushQuestion();
+        inTaggedQuestionBlock = false;
+      } else {
+        questionLinesBuffer.push(textContent);
+      }
+      continue;
+    }
+
+    // Natural / Untagged Paragraph Parsing Mode
     const passageMatch = textContent.match(/^(?:\[(?:Passage|قطعة|النص)\]|\b(?:Passage|قطعة|النص)\s*[:：])\s*(.+)/i);
     if (passageMatch) {
+      flushQuestion();
       currentPassage = passageMatch[1].trim();
       continue;
     }
 
     const lowerText = textContent.toLowerCase();
     const isJustTag = /^\[\/?.*?\]$/.test(textContent.trim());
-    if (lowerText === 'صورة' || lowerText === 'image' || lowerText === 'img' || /^\d+$/.test(textContent) || textContent.length < 3 || isJustTag) {
+    if (lowerText === 'صورة' || lowerText === 'image' || lowerText === 'img' || isJustTag) {
       continue;
     }
 
-    if (textContent.includes('?') || /^\d+[.\-):]/.test(textContent) || textContent.length > 5) {
-      parseSingleQuestionBuffer(textContent, currentPassage, pendingImage, questions);
-      pendingImage = null;
+    if (isQuestionHeaderLine(textContent)) {
+      // Flush previous question and start new question block
+      flushQuestion();
+      questionLinesBuffer.push(textContent);
+    } else if (isChoiceLine(textContent)) {
+      // Choice line belonging to the current question
+      questionLinesBuffer.push(textContent);
+    } else if (questionLinesBuffer.length > 0) {
+      // Continuation of current question or passage
+      questionLinesBuffer.push(textContent);
+    } else if (textContent.includes('?') || textContent.includes('؟') || textContent.length > 5) {
+      // Natural question starter without a explicit number
+      flushQuestion();
+      questionLinesBuffer.push(textContent);
     }
   }
 
-  if (questionBuffer.trim()) {
-    parseSingleQuestionBuffer(questionBuffer.trim(), currentPassage, pendingImage, questions);
-  }
+  // Flush any remaining question buffer
+  flushQuestion();
 
   return { questions };
 }

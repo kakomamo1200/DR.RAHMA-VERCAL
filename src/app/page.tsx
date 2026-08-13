@@ -7,8 +7,9 @@ import {
   LayoutDashboard, Shield, Plus, Trash2, Edit3, Upload, FileText,
   ChevronLeft, BarChart3, Timer,
   AlertTriangle, Eye, Play, Save, Send, Menu, X,
-  FolderOpen, HelpCircle, Award, Users, Download
+  FolderOpen, HelpCircle, Award, Users, Download, Bookmark, FileSpreadsheet, TrendingUp
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -82,6 +83,14 @@ export default function QuizBank() {
   const [resetCode, setResetCode] = useState("");
   const [resetCodeSentAt, setResetCodeSentAt] = useState<number>(0);
   const [resetCountdown, setResetCountdown] = useState(0);
+
+  // Advanced Student & Teacher Features State
+  const [markedForReview, setMarkedForReview] = useState<number[]>([]);
+  const [filterOnlyWrong, setFilterOnlyWrong] = useState(false);
+  const [analyticsDialog, setAnalyticsDialog] = useState(false);
+  const [analyticsQuizTitle, setAnalyticsQuizTitle] = useState("");
+  const [analyticsData, setAnalyticsData] = useState<Array<{ questionIndex: number; id: string; text: string; totalAnswered: number; correctCount: number; wrongCount: number; accuracyRate: number; isDifficult: boolean }>>([]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
   // Admin states
   const [adminTab, setAdminTab] = useState("subjects");
@@ -324,7 +333,47 @@ export default function QuizBank() {
     toast.success("Logged out");
   };
 
-  // Show review (declared first for hoisting)
+  // Start Quiz with Shuffle
+  const startQuiz = async (quizId: string) => {
+    if (!user) { setView("auth"); return; }
+    const data = await api("/api/attempts", {
+      method: "POST",
+      body: JSON.stringify({ action: "start", quizId }),
+    });
+
+    if (data.status === "already_submitted") {
+      showReview(data.attemptId);
+      return;
+    }
+    if (data.error) { toast.error(data.error); return; }
+
+    if (data.status === "started" || data.status === "resumed") {
+        // Randomize / Shuffle Questions and Choices for student fairness
+        let shuffledQuestions = data.questions || [];
+        if (data.status === "started") {
+          shuffledQuestions = [...shuffledQuestions].sort(() => Math.random() - 0.5);
+          shuffledQuestions = shuffledQuestions.map((q: any) => {
+            if (q.choices && q.choices.length > 0) {
+              return { ...q, choices: [...q.choices].sort(() => Math.random() - 0.5) };
+            }
+            return q;
+          });
+        }
+
+        setQuizData({ quiz: { id: quizId, title: data.quiz?.title || "Quiz", description: null, durationMinutes: data.durationMin }, questions: shuffledQuestions });
+        setAttemptId(data.attemptId);
+        setQuizAnswers(data.answers || new Array(shuffledQuestions.length).fill(null));
+        setMarkedForReview([]);
+        const startedTime = data.startedAt || Date.now();
+        setQuizStartTime(startedTime);
+        setServerTimeOffset(Date.now() - data.serverNow);
+        setTimeRemaining(Math.max(0, Math.floor((startedTime + data.durationMin * 60000 - Date.now()) / 1000)));
+        setQuizStarted(true);
+        setView("quiz");
+    }
+  };
+
+  // Show review
   const showReview = async (aid: string) => {
     setView("quiz");
     const data = await api(`/api/attempts?type=review&attemptId=${aid}`);
@@ -366,29 +415,6 @@ export default function QuizBank() {
       if (data.status === "saved") toast.success("Saved");
       if (data.status === "expired" || data.status === "already_submitted") { void submitQuiz(true); }
     } catch { /* silent */ }
-  };
-
-  // Quiz start
-  const startQuiz = async (quizId: string) => {
-    if (!user) { setView("auth"); return; }
-    const data = await api("/api/attempts", {
-      method: "POST",
-      body: JSON.stringify({ action: "start", quizId }),
-    });
-    if (data.status === "already_submitted") {
-      showReview(data.attemptId);
-      return;
-    }
-    if (data.error) { toast.error(data.error); return; }
-    setQuizData({ quiz: { id: quizId, title: data.durationMin ? "" : "", description: null, durationMinutes: data.durationMin || 40 }, questions: data.questions });
-    setQuizAnswers(data.answers || []);
-    setAttemptId(data.attemptId);
-    setQuizStartTime(data.startedAt);
-    setServerTimeOffset(data.serverNow - Date.now());
-    setQuizStarted(true);
-    setQuizSubmitted(false);
-    setReviewData(null);
-    setView("quiz");
   };
 
   // Admin: Save subject
@@ -827,7 +853,7 @@ export default function QuizBank() {
                   <h1 className="font-bold text-lg">{quizData?.quiz.title || "Quiz"}</h1>
                   {quizStarted && !quizSubmitted && (
                     <div className={`font-mono text-xl px-3 py-1.5 rounded-lg border ${timeRemaining < 60000 ? "bg-red-50 border-red-400 text-red-600 timer-pulse" : "bg-secondary border-primary/30 text-primary"}`}>
-                      {fmtTime(timeRemaining)}
+                      {fmtTime(timeRemaining * 1000)}
                     </div>
                   )}
                 </div>
@@ -851,90 +877,135 @@ export default function QuizBank() {
                 )}
               </div>
 
-              {/* Progress */}
-              {quizStarted && !quizSubmitted && (
-                <div className="mb-4">
-                  <Progress value={quizAnswers.filter(a => a !== null).length / (quizData?.questions.length || 1) * 100} className="h-2" />
-                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>{quizAnswers.filter(a => a !== null).length} / {quizData?.questions.length} answered</span>
-                    <span></span>
+              {/* Quiz Navigation & Bookmark Bar */}
+              {quizStarted && !quizSubmitted && quizData && (
+                <div className="bg-card border rounded-xl p-3 mb-4 shadow-xs sticky top-16 z-20 backdrop-blur-md bg-card/95">
+                  <div className="flex items-center justify-between mb-2 text-xs">
+                    <span className="font-semibold text-muted-foreground flex items-center gap-1">
+                      📌 التنقل بين الأسئلة / Navigation ({quizAnswers.filter(a => a !== null).length} / {quizData.questions.length})
+                    </span>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" /> تمت الإجابة</span>
+                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" /> للمراجعة</span>
+                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-secondary border inline-block" /> متبقي</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                    {quizData.questions.map((_, idx) => {
+                      const isAnswered = quizAnswers[idx] !== null;
+                      const isMarked = markedForReview.includes(idx);
+                      let btnBg = "bg-secondary text-foreground hover:bg-secondary/80 border-transparent";
+                      if (isMarked) btnBg = "bg-amber-500 text-white font-bold shadow-xs";
+                      else if (isAnswered) btnBg = "bg-green-600 text-white font-bold shadow-xs";
+
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            const el = document.getElementById(`q-card-${idx}`);
+                            if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                          }}
+                          className={`w-7 h-7 rounded-lg text-xs flex items-center justify-center transition-all border ${btnBg}`}
+                        >
+                          {idx + 1}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
-              {/* Questions */}
+              {/* Questions List */}
               {quizStarted && !quizSubmitted && quizData && (
                 <div className="space-y-4">
-                  {quizData.questions.map((q, qi) => (
-                    <motion.div key={q.id} id={`q-${qi}`} className={`bg-card border rounded-xl p-4 scroll-mt-40 transition-colors ${quizAnswers[qi] !== null ? "border-primary" : "border-border"}`}>
-                      {/* Reading Passage */}
-                      {q.passage && (
-                        <div className="mb-4 p-3.5 rounded-xl bg-primary/5 border border-primary/20 text-sm leading-relaxed">
-                          <div className="font-bold text-xs text-primary mb-1.5 flex items-center gap-1.5">
-                            <BookOpen className="w-4 h-4" /> قطعة قراءة / Passage
+                  {quizData.questions.map((q, qi) => {
+                    const isMarked = markedForReview.includes(qi);
+                    return (
+                      <motion.div key={q.id || qi} id={`q-card-${qi}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`bg-card border rounded-xl p-4 shadow-xs relative transition-all ${isMarked ? "border-amber-400 bg-amber-50/20" : ""}`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-muted-foreground font-semibold">Question {qi + 1} of {quizData.questions.length}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMarkedForReview(prev => isMarked ? prev.filter(i => i !== qi) : [...prev, qi]);
+                            }}
+                            className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1 font-medium transition-all ${
+                              isMarked ? "bg-amber-500 text-white border-amber-500" : "bg-secondary text-muted-foreground border-border hover:bg-amber-100 hover:text-amber-800"
+                            }`}
+                          >
+                            <Bookmark className="w-3.5 h-3.5" />
+                            {isMarked ? "مُعلم للمراجعة ✓" : "تعليم للمراجعة"}
+                          </button>
+                        </div>
+
+                        {/* Passage Box */}
+                        {q.passage && (
+                          <div className="mb-3 p-3 rounded-lg bg-primary/5 border border-primary/20 text-xs leading-relaxed">
+                            <span className="font-bold text-primary block mb-1">Passage / قطعة:</span>
+                            <p className="whitespace-pre-wrap">{q.passage}</p>
                           </div>
-                          <p className="whitespace-pre-wrap text-foreground font-medium">{q.passage}</p>
+                        )}
+
+                        {/* Full-width responsive image */}
+                        {q.imageUrl && (
+                          <div className="my-3 w-full rounded-xl overflow-hidden border border-border bg-black/5 flex justify-center items-center p-2">
+                            <img src={q.imageUrl} alt="Question image" className="w-full max-h-[450px] object-contain rounded-lg shadow-sm" />
+                          </div>
+                        )}
+
+                        <div className="flex items-start gap-2 mb-3">
+                          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-secondary text-primary text-xs font-bold shrink-0 mt-0.5">{qi + 1}</span>
+                          <p className="font-medium text-sm leading-relaxed">{q.text}{q.points > 1 ? ` (${q.points} pts)` : ""}</p>
                         </div>
-                      )}
 
-                      {/* Full-width responsive image */}
-                      {q.imageUrl && (
-                        <div className="my-3 w-full rounded-xl overflow-hidden border border-border bg-black/5 flex justify-center items-center p-2">
-                          <img src={q.imageUrl} alt="Question image" className="w-full max-h-[450px] object-contain rounded-lg shadow-sm" />
-                        </div>
-                      )}
-
-                      <div className="flex items-start gap-2 mb-3">
-                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-secondary text-primary text-xs font-bold shrink-0 mt-0.5">{qi + 1}</span>
-                        <p className="font-medium text-sm leading-relaxed">{q.text}{q.points > 1 ? ` (${q.points} pts)` : ""}</p>
-                      </div>
-
-                      {/* True / False vs MCQ Choices */}
-                      {q.type === "true_false" ? (
-                        <div className="grid grid-cols-2 gap-3 sm:max-w-md mt-2">
-                          {q.choices.map((choice, ci) => (
-                            <button
-                              key={ci}
-                              type="button"
-                              onClick={() => {
+                        {/* True / False vs MCQ Choices */}
+                        {q.type === "true_false" ? (
+                          <div className="grid grid-cols-2 gap-3 sm:max-w-md mt-2">
+                            {q.choices.map((choice, ci) => (
+                              <button
+                                key={ci}
+                                type="button"
+                                onClick={() => {
+                                  const newAnswers = [...quizAnswers];
+                                  newAnswers[qi] = ci;
+                                  setQuizAnswers(newAnswers);
+                                }}
+                                className={`p-3.5 rounded-xl border-2 font-bold text-sm flex items-center justify-center gap-2 transition-all ${
+                                  quizAnswers[qi] === ci
+                                    ? (ci === 0 ? "border-green-600 bg-green-600 text-white shadow-md" : "border-red-600 bg-red-600 text-white shadow-md")
+                                    : "border-border bg-card hover:bg-secondary text-foreground"
+                                }`}
+                              >
+                                {choice}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5 ml-8">
+                            {q.choices.map((choice, ci) => (
+                              <label key={ci} className={`quiz-choice flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${quizAnswers[qi] === ci ? "selected border-primary bg-secondary/80 font-semibold" : "border-border hover:bg-secondary/40"}`} onClick={() => {
                                 const newAnswers = [...quizAnswers];
                                 newAnswers[qi] = ci;
                                 setQuizAnswers(newAnswers);
-                              }}
-                              className={`p-3.5 rounded-xl border-2 font-bold text-sm flex items-center justify-center gap-2 transition-all ${
-                                quizAnswers[qi] === ci
-                                  ? (ci === 0 ? "border-green-600 bg-green-600 text-white shadow-md" : "border-red-600 bg-red-600 text-white shadow-md")
-                                  : "border-border bg-card hover:bg-secondary text-foreground"
-                              }`}
-                            >
-                              {choice}
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="space-y-1.5 ml-8">
-                          {q.choices.map((choice, ci) => (
-                            <label key={ci} className={`quiz-choice flex items-center gap-3 p-2.5 rounded-lg border ${quizAnswers[qi] === ci ? "selected border-primary bg-secondary" : "border-transparent"}`} onClick={() => {
-                              const newAnswers = [...quizAnswers];
-                              newAnswers[qi] = ci;
-                              setQuizAnswers(newAnswers);
-                            }}>
-                              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${quizAnswers[qi] === ci ? "border-primary" : "border-muted-foreground/30"}`}>
-                                {quizAnswers[qi] === ci && <div className="w-2 h-2 rounded-full bg-primary" />}
-                              </div>
-                              <span className="text-sm">{choice}</span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </motion.div>
-                  ))}
+                              }}>
+                                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${quizAnswers[qi] === ci ? "border-primary" : "border-muted-foreground/30"}`}>
+                                  {quizAnswers[qi] === ci && <div className="w-2 h-2 rounded-full bg-primary" />}
+                                </div>
+                                <span className="text-sm">{choice}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })}
                 </div>
               )}
 
               {/* Submit Bar */}
               {quizStarted && !quizSubmitted && (
-                <div className="sticky bottom-0 bg-background/80 backdrop-blur-sm pt-4 pb-2 mt-4">
+                <div className="sticky bottom-0 bg-background/80 backdrop-blur-sm pt-4 pb-2 mt-4 z-20">
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={saveProgress} className="gap-1.5"><Save className="w-4 h-4" /> Save</Button>
                     <Button onClick={() => submitQuiz(false)} className="flex-1 gap-1.5"><Send className="w-4 h-4" /> Submit Quiz</Button>
@@ -945,13 +1016,36 @@ export default function QuizBank() {
               {/* Review Results */}
               {quizSubmitted && reviewData && (
                 <div>
-                  <div className="bg-card border border-border rounded-xl p-6 text-center mb-6">
+                  <div className="bg-card border border-border rounded-xl p-6 text-center mb-6 shadow-xs">
                     <Award className="w-12 h-12 mx-auto mb-3 text-primary" />
                     <div className="font-mono text-4xl font-bold text-primary">{reviewData.score} / {reviewData.totalPoints}</div>
                     <p className="text-muted-foreground mt-1">{reviewData.percent}% correct</p>
+                    
+                    {/* Wrong Questions Filter Toggle */}
+                    <div className="flex items-center justify-center gap-2 mt-4 pt-4 border-t border-border">
+                      <Button
+                        size="sm"
+                        variant={!filterOnlyWrong ? "default" : "outline"}
+                        onClick={() => setFilterOnlyWrong(false)}
+                        className="text-xs gap-1"
+                      >
+                        عرض جميع الأسئلة ({reviewData.questions.length})
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={filterOnlyWrong ? "destructive" : "outline"}
+                        onClick={() => setFilterOnlyWrong(true)}
+                        className="text-xs gap-1"
+                      >
+                        ❌ الأسئلة الخاطئة فقط ({reviewData.questions.filter(q => q.picked !== q.correct).length})
+                      </Button>
+                    </div>
                   </div>
+
                   <div className="space-y-4">
-                    {reviewData.questions.map((q, qi) => {
+                    {reviewData.questions
+                      .filter(q => !filterOnlyWrong || q.picked !== q.correct)
+                      .map((q, qi) => {
                       const isCorrect = q.picked === q.correct;
                       return (
                         <div key={q.id} className={`bg-card border rounded-xl p-4 transition-all ${
@@ -1066,9 +1160,35 @@ export default function QuizBank() {
           {/* ========== ADMIN RESULTS (All Students) ========== */}
           {view === "dashboard" && user?.role === "admin" && (
             <motion.div key="admin-results" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-4xl mx-auto px-4 py-6">
-              <div className="mb-6">
-                <h1 className="text-2xl font-bold mb-1">All Student Results</h1>
-                <p className="text-muted-foreground text-sm">View all submitted quiz attempts from students</p>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                <div>
+                  <h1 className="text-2xl font-bold mb-1">All Student Results</h1>
+                  <p className="text-muted-foreground text-sm">View all submitted quiz attempts from students</p>
+                </div>
+                {attempts.length > 0 && (
+                  <Button
+                    onClick={() => {
+                      const exportData = attempts.map(a => ({
+                        "اسم الطالب": a.userName || a.userEmail || "Student",
+                        "البريد الإلكتروني": a.userEmail || "",
+                        "المادة": a.quiz.subjectName,
+                        "اسم الاختبار": a.quiz.title,
+                        "الدرجة": a.score,
+                        "الدرجة الكلية": a.totalPoints,
+                        "النسبة المئوية": `${a.percent}%`,
+                        "تاريخ التسليم": new Date(a.submittedAt).toLocaleString('ar-EG')
+                      }));
+                      const ws = XLSX.utils.json_to_sheet(exportData);
+                      const wb = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(wb, ws, "نتائج الطلاب");
+                      XLSX.writeFile(wb, `نتائج_الطلاب_${Date.now()}.xlsx`);
+                      toast.success("تم تصدير ملف Excel بنجاح!");
+                    }}
+                    className="gap-2 shrink-0 bg-green-700 hover:bg-green-800 text-white"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" /> تصدير النتائج Excel
+                  </Button>
+                )}
               </div>
 
               {attempts.length === 0 ? (
@@ -1308,7 +1428,22 @@ export default function QuizBank() {
                                     {q.endDate && <span className="ml-2 text-destructive font-medium">⏰ ينتهي: {new Date(q.endDate).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })}</span>}
                                   </p>
                                 </div>
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <Button size="sm" variant="ghost" onClick={async () => {
+                                    setAnalyticsQuizTitle(q.title);
+                                    setAnalyticsLoading(true);
+                                    setAnalyticsDialog(true);
+                                    try {
+                                      const res = await api(`/api/attempts?type=quiz-analytics&quizId=${q.id}`);
+                                      setAnalyticsData(res.analytics || []);
+                                    } catch {
+                                      toast.error("فشل تحميل الإحصائيات");
+                                    } finally {
+                                      setAnalyticsLoading(false);
+                                    }
+                                  }} title="Item Analytics / إحصائيات الأسئلة" className="gap-1 text-xs text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200">
+                                    <TrendingUp className="w-3.5 h-3.5" /> إحصائيات
+                                  </Button>
                                   <Button size="sm" variant="ghost" onClick={() => openStudentPreview(q.id)} title="Student Preview / معاينة الطالب" className="gap-1 text-xs text-primary">
                                     <Eye className="w-3.5 h-3.5" /> Preview
                                   </Button>
@@ -1735,6 +1870,59 @@ export default function QuizBank() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setPreviewDialog(false)}>Close Preview</Button>
+          </DialogFooter>
+        </DialogContent>
+      {/* ===== Analytics Dialog ===== */}
+      <Dialog open={analyticsDialog} onOpenChange={setAnalyticsDialog}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-primary">
+              <TrendingUp className="w-5 h-5 text-amber-700" />
+              إحصائيات وتحليل الأسئلة: {analyticsQuizTitle}
+            </DialogTitle>
+          </DialogHeader>
+          {analyticsLoading ? (
+            <div className="p-8 text-center text-muted-foreground animate-pulse">جاري تحميل إحصائيات الأداء...</div>
+          ) : analyticsData.length === 0 ? (
+            <div className="p-6 text-center text-muted-foreground">لا توجد محاولات للطلاب بعد لحساب الإحصائيات.</div>
+          ) : (
+            <div className="space-y-3 my-2">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-center justify-between">
+                <span>إجمالي الأسئلة المستهدفة: <strong>{analyticsData.length} أسئلة</strong></span>
+                <span>الأسئلة الصعبة (&lt;50% نسبة إجابة): <strong className="text-red-600">{analyticsData.filter(a => a.isDifficult).length}</strong></span>
+              </div>
+              {analyticsData.map(a => (
+                <div key={a.id} className={`p-3.5 border rounded-xl bg-card space-y-2 ${a.isDifficult ? "border-red-300 bg-red-50/30" : "border-border"}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-xs font-bold text-foreground">
+                      س{a.questionIndex}: {a.text}
+                    </span>
+                    {a.isDifficult && (
+                      <Badge variant="destructive" className="shrink-0 text-[10px] gap-1">
+                        ⚠️ سؤال صعب
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 text-xs">
+                    <div className="flex-1 bg-secondary rounded-full h-2 overflow-hidden border">
+                      <div
+                        className={`h-full transition-all ${a.accuracyRate >= 70 ? "bg-green-600" : a.accuracyRate >= 50 ? "bg-amber-500" : "bg-red-500"}`}
+                        style={{ width: `${a.accuracyRate}%` }}
+                      />
+                    </div>
+                    <span className="font-bold font-mono min-w-12 text-right">{a.accuracyRate}% صح</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                    <span>إجمالي من أجاب: {a.totalAnswered} طالب</span>
+                    <span className="text-green-700 font-semibold">صحيح: {a.correctCount}</span>
+                    <span className="text-red-600 font-semibold">خطأ: {a.wrongCount}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAnalyticsDialog(false)}>إغلاق / Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
