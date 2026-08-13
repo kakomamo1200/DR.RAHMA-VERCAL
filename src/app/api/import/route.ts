@@ -189,12 +189,13 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
 
       const aiPrompt = `You are an expert AI quiz document parser. Analyze the following document text and extract all questions, passages, choices, correct answers, and image associations.
 
-RULES:
-1. Identify any reading passage/text preceding a group of questions. If a passage applies to a question, assign it to "passage".
-2. Identify question text ("text"). Strip question numbering like "1." or "Q1:".
-3. Identify choices ("choices"). For MCQ questions, extract 2-6 choices. Mark the correct choice as "isCorrect: true" if indicated with an asterisk (*), bold, or explicit answer key. If not specified, set the first choice as correct.
-4. For True/False questions, set type to "true_false" and provide "صح" and "خطأ" choices.
-5. Identify any image marker (e.g. "[IMAGE_1]", "[IMAGE_2]") linked to a question or passage and set "imageMarker" to that exact tag.
+CRITICAL RULES:
+1. ANSWER KEY DETECTION: Check the end of the document for any Answer Key list or table (e.g., "مفتاح الإجابات", "إجابات الاختبار", "نموذج الإجابة", "Answer Key", or lists like "1-أ", "2-ب", "1: A"). Use this Answer Key to determine which choice is correct for each question (isCorrect: true). DO NOT output the Answer Key section itself as a question!
+2. NO REPEATING QUESTION AS CHOICE: NEVER put the question text or question title inside the choices array! Choices must ONLY be actual options (e.g. A, B, C, D).
+3. MAXIMUM 4 CHOICES FOR MCQ: For MCQ questions, provide at most 4 distinct choices. Strip choice prefixes like "أ)", "ب)", "A)", "B)", "1.".
+4. PASSAGES: Identify any reading passage/text preceding questions and set "passage".
+5. TRUE/FALSE: For True/False questions, set type to "true_false" and provide "صح" and "خطأ" choices.
+6. IMAGES: Identify any image marker (e.g. "[IMAGE_1]") linked to a question or passage and set "imageMarker" to that tag.
 
 Document Content:
 ${textWithMarkers}`;
@@ -217,18 +218,51 @@ ${textWithMarkers}`;
           if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
             const aiQuestions: ParsedQuestion[] = rawQuestions.map((q: any) => {
               const imgUrl = q.imageMarker ? (imageMap[q.imageMarker] || null) : null;
+              const cleanQText = (q.text || 'Question')
+                .replace(/^سؤال\s*\d+[:：\s]*/i, '')
+                .replace(/^س\d+[:：\s]*/i, '')
+                .replace(/^\d+[\.\-:\s]*/, '')
+                .trim();
+
+              let cleanedChoices: { text: string; isCorrect: boolean }[] = [];
+
+              if (q.type === 'true_false' || !Array.isArray(q.choices) || q.choices.length < 2) {
+                const isFalseCorrect = Array.isArray(q.choices) && q.choices.some((c: any) => (typeof c === 'string' ? c : c.text).includes('خطأ') && c.isCorrect);
+                cleanedChoices = [
+                  { text: 'صح', isCorrect: !isFalseCorrect },
+                  { text: 'خطأ', isCorrect: isFalseCorrect }
+                ];
+              } else {
+                cleanedChoices = q.choices
+                  .map((c: any) => {
+                    const rawText = typeof c === 'string' ? c : (c.text || '');
+                    const cleanChoiceText = rawText
+                      .replace(/^(?:\(?([A-Da-dأ-د1-6])\)?[\.\-:\s]+|\*)/i, '')
+                      .trim();
+                    return {
+                      text: cleanChoiceText,
+                      isCorrect: typeof c === 'object' ? Boolean(c.isCorrect) : false
+                    };
+                  })
+                  .filter((c: any) => {
+                    if (!c.text || c.text.length < 1) return false;
+                    if (c.text.toLowerCase() === cleanQText.toLowerCase()) return false;
+                    if (/^(?:سؤال|س\d+|مفتاح الإجابات|answer key)$/i.test(c.text)) return false;
+                    return true;
+                  })
+                  .slice(0, 4);
+
+                if (!cleanedChoices.some(c => c.isCorrect) && cleanedChoices.length > 0) {
+                  cleanedChoices[0].isCorrect = true;
+                }
+              }
+
               return {
-                text: q.text || 'Question',
+                text: cleanQText,
                 passage: q.passage || null,
                 type: q.type === 'true_false' ? 'true_false' : 'mcq',
                 imageUrl: imgUrl,
-                choices: Array.isArray(q.choices) ? q.choices.map((c: any) => ({
-                  text: typeof c === 'string' ? c : (c.text || 'Choice'),
-                  isCorrect: typeof c === 'object' ? Boolean(c.isCorrect) : false
-                })) : [
-                  { text: 'صح', isCorrect: true },
-                  { text: 'خطأ', isCorrect: false }
-                ]
+                choices: cleanedChoices
               };
             });
             return { questions: aiQuestions };

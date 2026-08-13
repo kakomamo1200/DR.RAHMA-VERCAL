@@ -881,44 +881,7 @@ export default function QuizBank() {
                 )}
               </div>
 
-              {/* Quiz Navigation & Bookmark Bar */}
-              {quizStarted && !quizSubmitted && quizData && (
-                <div className="bg-card border rounded-xl p-3 mb-4 shadow-xs sticky top-16 z-20 backdrop-blur-md bg-card/95">
-                  <div className="flex items-center justify-between mb-2 text-xs">
-                    <span className="font-semibold text-muted-foreground flex items-center gap-1">
-                      📌 التنقل بين الأسئلة / Navigation ({quizAnswers.filter(a => a !== null).length} / {quizData.questions.length})
-                    </span>
-                    <div className="flex items-center gap-2 text-[11px]">
-                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" /> تمت الإجابة</span>
-                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" /> للمراجعة</span>
-                      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-secondary border inline-block" /> متبقي</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                    {quizData.questions.map((_, idx) => {
-                      const isAnswered = quizAnswers[idx] !== null;
-                      const isMarked = markedForReview.includes(idx);
-                      let btnBg = "bg-secondary text-foreground hover:bg-secondary/80 border-transparent";
-                      if (isMarked) btnBg = "bg-amber-500 text-white font-bold shadow-xs";
-                      else if (isAnswered) btnBg = "bg-green-600 text-white font-bold shadow-xs";
 
-                      return (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => {
-                            const el = document.getElementById(`q-card-${idx}`);
-                            if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-                          }}
-                          className={`w-7 h-7 rounded-lg text-xs flex items-center justify-center transition-all border ${btnBg}`}
-                        >
-                          {idx + 1}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
 
               {/* Questions List */}
               {quizStarted && !quizSubmitted && quizData && (
@@ -1004,6 +967,56 @@ export default function QuizBank() {
                       </motion.div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Unanswered Questions Summary Bar at the Bottom */}
+              {quizStarted && !quizSubmitted && quizData && (
+                <div className="bg-card border rounded-xl p-4 mt-6 mb-3 shadow-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-xs text-foreground flex items-center gap-1.5">
+                      📋 الأسئلة المتبقية بدون إجابة ({quizData.questions.length - quizAnswers.filter(a => a !== null).length})
+                    </span>
+                    {markedForReview.length > 0 && (
+                      <span className="text-xs text-amber-700 font-semibold flex items-center gap-1">
+                        <Bookmark className="w-3.5 h-3.5" /> {markedForReview.length} سؤال مُعلم للمراجعة
+                      </span>
+                    )}
+                  </div>
+                  
+                  {quizAnswers.filter(a => a === null).length === 0 ? (
+                    <div className="p-2.5 bg-green-50 border border-green-200 rounded-lg text-xs text-green-800 font-medium text-center flex items-center justify-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-green-600" /> أحسنت! تم الإجابة على جميع الأسئلة ({quizData.questions.length}/{quizData.questions.length})
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">اضغط على رقم أي سؤال متبقي للانتقال إليه وتحديد إجابته:</p>
+                      <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                        {quizData.questions.map((_, idx) => {
+                          if (quizAnswers[idx] !== null) return null;
+                          const isMarked = markedForReview.includes(idx);
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                const el = document.getElementById(`q-card-${idx}`);
+                                if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
+                                isMarked 
+                                  ? "bg-amber-500 text-white border-amber-600 shadow-xs" 
+                                  : "bg-red-50 text-red-700 border-red-300 hover:bg-red-100"
+                              }`}
+                            >
+                              <span>سؤال {idx + 1}</span>
+                              {isMarked && <span>🔖</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
