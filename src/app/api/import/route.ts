@@ -154,17 +154,98 @@ function parseSingleQuestionBuffer(
 }
 
 async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestion[] }> {
+  let imageCounter = 0;
+  const imageMap: Record<string, string> = {};
+
   const result = await mammoth.convertToHtml({ buffer }, {
     convertImage: mammoth.images.imgElement(async (image) => {
       const imgBuffer = await image.read();
       const ext = image.contentType?.split('/')[1] || 'png';
-      return { src: await saveImageToDisk(Buffer.from(imgBuffer), ext) };
+      const savedUrl = await saveImageToDisk(Buffer.from(imgBuffer), ext);
+      imageCounter++;
+      const marker = `[IMAGE_${imageCounter}]`;
+      imageMap[marker] = savedUrl;
+      return { src: savedUrl };
     }),
   });
-  const html = result.value;
-  const questions: ParsedQuestion[] = [];
 
-  // Split HTML by structural tags (<p>, <div>, <tr>, <h1-6>, <img>)
+  const html = result.value;
+
+  // Try AI Parsing via Gemini API if API key is configured
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    try {
+      // Reconstruct document text with image markers
+      const textWithMarkers = html
+        .replace(/<img[^>]+src="([^"]+)"[^>]*>/gi, (match, src) => {
+          const entry = Object.entries(imageMap).find(([k, v]) => v === src);
+          return entry ? `\n${entry[0]}\n` : '\n[IMAGE]\n';
+        })
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+      const aiPrompt = `You are an expert AI quiz document parser. Analyze the following document text and extract all questions, passages, choices, correct answers, and image associations.
+
+RULES:
+1. Identify any reading passage/text preceding a group of questions. If a passage applies to a question, assign it to "passage".
+2. Identify question text ("text"). Strip question numbering like "1." or "Q1:".
+3. Identify choices ("choices"). For MCQ questions, extract 2-6 choices. Mark the correct choice as "isCorrect: true" if indicated with an asterisk (*), bold, or explicit answer key. If not specified, set the first choice as correct.
+4. For True/False questions, set type to "true_false" and provide "صح" and "خطأ" choices.
+5. Identify any image marker (e.g. "[IMAGE_1]", "[IMAGE_2]") linked to a question or passage and set "imageMarker" to that exact tag.
+
+Document Content:
+${textWithMarkers}`;
+
+      const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: aiPrompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      });
+
+      if (aiResponse.ok) {
+        const aiData = await aiResponse.json();
+        const jsonText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (jsonText) {
+          const parsedJSON = JSON.parse(jsonText);
+          const rawQuestions = parsedJSON.questions || parsedJSON;
+          if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
+            const aiQuestions: ParsedQuestion[] = rawQuestions.map((q: any) => {
+              const imgUrl = q.imageMarker ? (imageMap[q.imageMarker] || null) : null;
+              return {
+                text: q.text || 'Question',
+                passage: q.passage || null,
+                type: q.type === 'true_false' ? 'true_false' : 'mcq',
+                imageUrl: imgUrl,
+                choices: Array.isArray(q.choices) ? q.choices.map((c: any) => ({
+                  text: typeof c === 'string' ? c : (c.text || 'Choice'),
+                  isCorrect: typeof c === 'object' ? Boolean(c.isCorrect) : false
+                })) : [
+                  { text: 'صح', isCorrect: true },
+                  { text: 'خطأ', isCorrect: false }
+                ]
+              };
+            });
+            return { questions: aiQuestions };
+          }
+        }
+      }
+    } catch (aiErr) {
+      console.warn('Gemini AI parsing failed, falling back to deterministic parser:', aiErr);
+    }
+  }
+
+  // Fallback Deterministic Parser
+  return parseWordFileDeterministic(html);
+}
+
+async function parseWordFileDeterministic(html: string): Promise<{ questions: ParsedQuestion[] }> {
+  const questions: ParsedQuestion[] = [];
   const blocks = html.split(/(?=<(?:p|div|tr|h\d|img)[^>]*>)/i).filter(b => b.trim());
 
   let pendingImage: string | null = null;
@@ -187,7 +268,6 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
   };
 
   const isQuestionHeaderLine = (line: string) => {
-    // Regex for question starters: 1., 1-, 1), (1), س1, سؤال 1, Q1:
     return /^(?:[Qq]\d*[\.\-:\s]|\(?\d+\)?[\.\-:\s]|س\s*\d+|سؤال\s*\d+)/.test(line.trim()) ||
            /\[(?:QUESTION|سؤال|Q)\]/i.test(line);
   };
