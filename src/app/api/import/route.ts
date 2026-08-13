@@ -76,12 +76,10 @@ function parseSingleQuestionBuffer(
   const questionTextLines: string[] = [];
 
   for (const line of lines) {
-    // Skip tag markers inside lines
     if (/^\[\/?(?:TRUE_FALSE|صح_خطأ|QUESTION|سؤال|Q|PASSAGE|قطعة|النص|CORRECT|CHOICE|صورة|IMAGE)\]$/i.test(line)) continue;
 
-    // Check if line is a choice
-    // Choice patterns: A), A-, A., (A), أ), أ-, (أ), 1), 1-, * Choice, [CHOICE] Choice
-    const choiceMatch = line.match(/^(?:\*|\[CORRECT\])?\s*(?:\(?([A-Da-dأ-د1-6])\)?[\.\-:\s]+|\*|\[CHOICE\]\s*)(.+)/i);
+    // Choice patterns: MUST match letters (A, B, C, D, E, أ, ب, ج, د), NOT pure digits (1, 2, 3)
+    const choiceMatch = line.match(/^(?:\*|\[CORRECT\])?\s*(?:\(?([A-Ea-eأ-د])\)?[\.\-:\s]+|\*|\[CHOICE\]\s*)(.+)/i);
     const hasAsterisk = line.startsWith('*') || line.includes('[CORRECT]') || line.includes('✔') || /\((?:صح|صحيحة|correct)\)/i.test(line);
 
     if (choiceMatch && choiceMatch[2]) {
@@ -101,7 +99,6 @@ function parseSingleQuestionBuffer(
     }
   }
 
-  // Clean all residual tags from question text
   let finalQText = questionTextLines.join(' ')
     .replace(/\[\/?(?:QUESTION|سؤال|Q|TRUE_FALSE|صح_خطأ|CORRECT|CHOICE|صورة|IMAGE|PASSAGE|قطعة|النص)\]/gi, '')
     .replace(/\[\/?.*?\]/gi, '')
@@ -111,14 +108,14 @@ function parseSingleQuestionBuffer(
     finalQText = lines[0].replace(/\[\/?.*?\]/gi, '').trim();
   }
 
-  // Filter out invalid/empty/junk question text
-  if (!finalQText || finalQText.length < 2 || /^صورة|image|img$/i.test(finalQText)) return;
+  // Reject headers, banners, instructions, or empty text
+  if (!finalQText || finalQText.length < 3 || /^صورة|image|img$/i.test(finalQText)) return;
+  if (/^(?:quiz|lecture|chapter|course|instructor|dr\.|answer key|مفتاح الإجابات|إجابات الاختبار|نموذج الإجابة|instructions)/i.test(finalQText)) return;
 
   const hasExplicitCorrect = choices.some(c => c.isCorrect);
 
-  if (isTF || choices.length < 2) {
-    // True/False format
-    let tfCorrectIndex = 0; // Default to 'صح'
+  if (isTF) {
+    let tfCorrectIndex = 0;
     if (hasExplicitCorrect) {
       const correctChoiceIndex = choices.findIndex(c => c.isCorrect);
       if (correctChoiceIndex !== -1) {
@@ -137,20 +134,42 @@ function parseSingleQuestionBuffer(
         { text: 'خطأ', isCorrect: tfCorrectIndex === 1 }
       ]
     });
-  } else {
-    // MCQ format: if no choice was explicitly marked correct, default first choice as correct
-    if (!hasExplicitCorrect && choices.length > 0) {
-      choices[0].isCorrect = true;
-    }
+  } else if (choices.length >= 2) {
+    // MCQ format
+    const filteredChoices = choices
+      .filter(c => c.text && c.text.toLowerCase() !== finalQText.toLowerCase())
+      .slice(0, 4);
 
-    questionsList.push({
-      text: finalQText,
-      passage,
-      type: 'mcq',
-      imageUrl: image,
-      choices: choices.slice(0, 6)
-    });
+    if (filteredChoices.length >= 2) {
+      if (!filteredChoices.some(c => c.isCorrect)) {
+        filteredChoices[0].isCorrect = true;
+      }
+
+      questionsList.push({
+        text: finalQText,
+        passage,
+        type: 'mcq',
+        imageUrl: image,
+        choices: filteredChoices
+      });
+    }
   }
+}
+
+function extractAnswerKeyMapFromHtml(html: string): Record<number, string> {
+  const map: Record<number, string> = {};
+  const akSectionMatch = html.match(/(?:Answer Key|مفتاح الإجابات|إجابات الاختبار|نموذج الإجابة)[\s\S]*/i);
+  if (akSectionMatch) {
+    const akText = akSectionMatch[0].replace(/<[^>]+>/g, ' ');
+    const matches = akText.matchAll(/(\d+)\s*[\.\-:\s]\s*([A-Ea-eأ-د]|True|False|صح|خطأ)/gi);
+    for (const m of matches) {
+      const qNum = parseInt(m[1]);
+      if (qNum > 0 && qNum < 300) {
+        map[qNum] = m[2].trim().toUpperCase();
+      }
+    }
+  }
+  return map;
 }
 
 async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestion[] }> {
@@ -169,13 +188,18 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
     }),
   });
 
-  const html = result.value;
+  const fullHtml = result.value;
+
+  // Extract Answer Key map from tables/lists at the end
+  const answerKeyMap = extractAnswerKeyMapFromHtml(fullHtml);
+
+  // Strip Answer Key section completely from HTML before parsing questions
+  const html = fullHtml.replace(/<(?:p|h\d|div|tr)[^>]*>\s*(?:Answer Key|مفتاح الإجابات|إجابات الاختبار|نموذج الإجابة)[\s\S]*/i, '');
 
   // Try AI Parsing via Gemini API if API key is configured
   const apiKey = process.env.GEMINI_API_KEY;
   if (apiKey) {
     try {
-      // Reconstruct document text with image markers
       const textWithMarkers = html
         .replace(/<img[^>]+src="([^"]+)"[^>]*>/gi, (match, src) => {
           const entry = Object.entries(imageMap).find(([k, v]) => v === src);
@@ -190,14 +214,13 @@ async function parseWordFile(buffer: Buffer): Promise<{ questions: ParsedQuestio
       const aiPrompt = `You are an expert AI quiz document parser. Analyze the following document text and extract ONLY genuine quiz questions into valid JSON.
 
 CRITICAL RULES:
-1. IGNORE DOCUMENT TITLES & METADATA: Completely IGNORE document titles, course names, lecture headers (e.g. "NEUROPHYSIOLOGY & NERVE CONDUCTION STUDIES Quiz — Lecture 1...", "Intro to...", "Dr. Rahma", "Instructions: Choose the best answer"). DO NOT output document titles or instructions as questions!
-2. KEEP EXACT WORDING: PRESERVE THE EXACT ORIGINAL WORDING of all real questions and choices. DO NOT rephrase, alter, or summarize any words or characters in the questions or choices.
-3. ANSWER KEY & FOOTER FILTERING: Check the document for an Answer Key section (e.g., "Answer Key", "مفتاح الإجابات", "إجابات الاختبار", or lists like "1-A 2-B 3-C"). Use the Answer Key ONLY to set "isCorrect: true" on matching choices. NEVER output Answer Key items (e.g. "1-A", "2-B") as questions!
-4. NO REPEATING QUESTION AS CHOICE: Never put the question text inside the choices list.
-5. MAXIMUM 4 CHOICES FOR MCQ: For MCQ questions, extract at most 4 choices. Strip choice prefixes like "A)", "B)", "1.", "أ)".
-6. PASSAGES: If a reading passage precedes questions, assign it to "passage".
-7. TRUE/FALSE: For True/False questions, set type to "true_false" and provide "صح" and "خطأ" choices.
-8. IMAGES: Link image markers (e.g. "[IMAGE_1]") to their respective questions via "imageMarker".
+1. IGNORE DOCUMENT TITLES & METADATA: Completely IGNORE document titles, course names, lecture headers (e.g. "NEUROPHYSIOLOGY & NERVE CONDUCTION STUDIES Quiz — Lecture 1...", "Section A", "Section B", "Dr. Rahma", "Instructions: Choose the best answer"). DO NOT output document titles or section headers as questions!
+2. KEEP EXACT WORDING: PRESERVE THE EXACT ORIGINAL WORDING of all real questions and choices. DO NOT rephrase, alter, or summarize any words or characters.
+3. NO REPEATING QUESTION AS CHOICE: NEVER put the question text or question title inside the choices array! Choices must ONLY be actual options (e.g. A, B, C, D).
+4. MAXIMUM 4 CHOICES FOR MCQ: For MCQ questions, extract at most 4 choices (A, B, C, D). Strip choice prefixes like "A)", "B)", "A.".
+5. PASSAGES: If a reading passage precedes questions, assign it to "passage".
+6. TRUE/FALSE: For True/False questions, set type to "true_false" and provide "صح" and "خطأ" choices.
+7. IMAGES: Link image markers (e.g. "[IMAGE_1]") to their respective questions via "imageMarker".
 
 Document Content:
 ${textWithMarkers}`;
@@ -219,32 +242,39 @@ ${textWithMarkers}`;
           const rawQuestions = parsedJSON.questions || parsedJSON;
           if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
             const aiQuestions: ParsedQuestion[] = rawQuestions
-              .map((q: any) => {
+              .map((q: any, qIdx: number) => {
                 const imgUrl = q.imageMarker ? (imageMap[q.imageMarker] || null) : null;
                 const rawQText = (q.text || '').trim();
 
-                // Clean question numbering prefix like "1.", "Q1:", "س1:"
                 const cleanQText = rawQText
                   .replace(/^سؤال\s*\d+[:：\s]*/i, '')
                   .replace(/^س\d+[:：\s]*/i, '')
                   .replace(/^\d+[\.\-:\s]*/, '')
                   .trim();
 
+                const qNum = qIdx + 1;
+                const targetAnsLetter = answerKeyMap[qNum];
+
                 let cleanedChoices: { text: string; isCorrect: boolean }[] = [];
                 const isExplicitTF = q.type === 'true_false' || /\b(T\/F|True\/False|صح\/خطأ|صح_خطأ)\b/i.test(rawQText) || /\b(صح|خطأ|true|false)\b/i.test(rawQText);
 
                 if (isExplicitTF) {
-                  const isFalseCorrect = Array.isArray(q.choices) && q.choices.some((c: any) => (typeof c === 'string' ? c : c.text).includes('خطأ') && c.isCorrect);
+                  let isTrue = true;
+                  if (targetAnsLetter) {
+                    isTrue = targetAnsLetter === 'TRUE' || targetAnsLetter === 'صح' || targetAnsLetter === 'A';
+                  } else if (Array.isArray(q.choices)) {
+                    isTrue = !q.choices.some((c: any) => (typeof c === 'string' ? c : c.text).includes('خطأ') && c.isCorrect);
+                  }
                   cleanedChoices = [
-                    { text: 'صح', isCorrect: !isFalseCorrect },
-                    { text: 'خطأ', isCorrect: isFalseCorrect }
+                    { text: 'صح', isCorrect: isTrue },
+                    { text: 'خطأ', isCorrect: !isTrue }
                   ];
                 } else if (Array.isArray(q.choices) && q.choices.length >= 2) {
                   cleanedChoices = q.choices
                     .map((c: any) => {
                       const rawText = typeof c === 'string' ? c : (c.text || '');
                       const cleanChoiceText = rawText
-                        .replace(/^(?:\(?([A-Da-dأ-د1-6])\)?[\.\-:\s]+|\*)/i, '')
+                        .replace(/^(?:\(?([A-Ea-eأ-د])\)?[\.\-:\s]+|\*)/i, '')
                         .trim();
                       return {
                         text: cleanChoiceText,
@@ -259,12 +289,18 @@ ${textWithMarkers}`;
                     })
                     .slice(0, 4);
 
-                  if (!cleanedChoices.some(c => c.isCorrect) && cleanedChoices.length > 0) {
+                  // Apply Answer Key if present
+                  if (targetAnsLetter) {
+                    const letterIndexMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'أ': 0, 'ب': 1, 'ج': 2, 'د': 3 };
+                    const correctIdx = letterIndexMap[targetAnsLetter];
+                    if (correctIdx !== undefined && correctIdx < cleanedChoices.length) {
+                      cleanedChoices.forEach((c, idx) => { c.isCorrect = (idx === correctIdx); });
+                    }
+                  } else if (!cleanedChoices.some(c => c.isCorrect) && cleanedChoices.length > 0) {
                     cleanedChoices[0].isCorrect = true;
                   }
                 }
 
-                // Reject if no valid choices were found
                 if (cleanedChoices.length < 2) {
                   return null;
                 }
@@ -280,10 +316,9 @@ ${textWithMarkers}`;
               .filter((q: ParsedQuestion | null): q is ParsedQuestion => {
                 if (!q || !q.text || q.text.length < 3) return false;
                 const lower = q.text.toLowerCase();
-                // Reject titles, headers, lecture names, instructions, and answer key items
                 if (lower.includes('quiz') || lower.includes('lecture') || lower.includes('intro to') || lower.includes('technique of') || lower.includes('conduction studies')) return false;
                 if (/^(?:quiz|lecture|chapter|course|instructor|dr\.|answer key|مفتاح الإجابات|إجابات الاختبار|نموذج الإجابة|instructions)/i.test(q.text)) return false;
-                if (/^(?:[0-9]{1,3}\s*[\-:\.]\s*[A-Da-dأ-د])\s*$/.test(q.text)) return false; // Answer Key standalone like "1-A"
+                if (/^(?:[0-9]{1,3}\s*[\-:\.]\s*[A-Da-dأ-د])\s*$/.test(q.text)) return false;
                 return true;
               });
 
@@ -299,10 +334,10 @@ ${textWithMarkers}`;
   }
 
   // Fallback Deterministic Parser
-  return parseWordFileDeterministic(html);
+  return parseWordFileDeterministic(html, answerKeyMap);
 }
 
-async function parseWordFileDeterministic(html: string): Promise<{ questions: ParsedQuestion[] }> {
+async function parseWordFileDeterministic(html: string, answerKeyMap: Record<number, string>): Promise<{ questions: ParsedQuestion[] }> {
   const questions: ParsedQuestion[] = [];
   const blocks = html.split(/(?=<(?:p|div|tr|h\d|img)[^>]*>)/i).filter(b => b.trim());
 
@@ -331,7 +366,7 @@ async function parseWordFileDeterministic(html: string): Promise<{ questions: Pa
   };
 
   const isChoiceLine = (line: string) => {
-    return /^(?:\*|\[CORRECT\])?\s*(?:\(?([A-Da-dأ-د1-6])\)?[\.\-:\s]+|\*|\[CHOICE\])/i.test(line.trim());
+    return /^(?:\*|\[CORRECT\])?\s*(?:\(?([A-Ea-eأ-د])\)?[\.\-:\s]+|\*|\[CHOICE\])/i.test(line.trim());
   };
 
   for (const block of blocks) {
@@ -435,6 +470,25 @@ async function parseWordFileDeterministic(html: string): Promise<{ questions: Pa
 
   // Flush any remaining question buffer
   flushQuestion();
+
+  // Apply Answer Key map to parsed questions
+  questions.forEach((q, idx) => {
+    const qNum = idx + 1;
+    const targetAnsLetter = answerKeyMap[qNum];
+    if (targetAnsLetter && q.choices && q.choices.length > 0) {
+      const letterIndexMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'أ': 0, 'ب': 1, 'ج': 2, 'د': 3 };
+      const correctIdx = letterIndexMap[targetAnsLetter];
+      if (correctIdx !== undefined && correctIdx < q.choices.length) {
+        q.choices.forEach((c, cIdx) => { c.isCorrect = (cIdx === correctIdx); });
+      } else if (q.type === 'true_false') {
+        const isTrue = targetAnsLetter === 'TRUE' || targetAnsLetter === 'صح' || targetAnsLetter === 'A';
+        q.choices = [
+          { text: 'صح', isCorrect: isTrue },
+          { text: 'خطأ', isCorrect: !isTrue }
+        ];
+      }
+    }
+  });
 
   return { questions };
 }
